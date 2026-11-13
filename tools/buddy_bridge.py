@@ -40,10 +40,17 @@ goes its own way after a minute and shows he's not connected. Session state is k
 Extras for debugging:  GET /status   POST /cmd  (body: a raw command such as "s done")
                        GET /sound    POST /sound (body: on | off | toggle | play <moment>)
                        (play tap_<gag>_<mood> plays a gag's sound, e.g. play tap_shock_idle)
-Install as a login item with tools/install_bridge.sh.
+Install as a login item with tools/install_bridge.sh (macOS) or tools/install_bridge.ps1 (Windows).
+
+On Windows it runs the same way, minus what still needs a Mac: knowing which app is in front and which
+Code session you're looking at (class Focus), and Chat/Cowork state (the app watcher is a Mac helper).
+Sounds go through winsound instead of afplay, and the board is found by its USB ids (tools/lump_ports.py).
 """
-import glob, http.server, json, logging, logging.handlers, os, random, re, subprocess, sys, threading, time, wave
+import array, glob, http.server, json, logging, logging.handlers, os, random, re, subprocess, sys, threading, time, wave
 import serial
+
+import lump_ports                       # sits next to this file (tools/, or ~/.desk-buddy once installed)
+IS_WIN = lump_ports.IS_WIN
 
 HTTP_PORT = 47823
 HOME = os.environ.get("DESKBUDDY_HOME") or os.path.expanduser("~/.desk-buddy")   # tests point this elsewhere
@@ -102,7 +109,7 @@ FIDGET_EVERY = (5 * 60, 15 * 60)
 # the moment a gag starts. Each sound is timed from the gag's first drawing, which comes GAG_LEAD after
 # that (his way in from the mood is padded to 12 frames at 24 fps); the night startle has no way in.
 GAG_LEAD = 0.5
-AFPLAY_LAG = 0.05                       # afplay takes a moment to start making sound
+AFPLAY_LAG = 0.05                       # afplay (or winsound) takes a moment to start making sound
 # Heartbeat: "h <seconds since local midnight>" every HEARTBEAT_EVERY. If the board hears nothing
 # for a minute (bridge crashed, Mac asleep, USB power only) he goes his own way: idle and fidgeting,
 # asleep at night, with a little unplugged-cable mark. The heartbeat also tells him the time.
@@ -122,7 +129,7 @@ log.setLevel(logging.INFO)
 _h = logging.handlers.RotatingFileHandler(os.path.join(HOME, "bridge.log"), maxBytes=500_000, backupCount=2)
 _h.setFormatter(logging.Formatter("%(asctime)s %(message)s"))
 log.addHandler(_h)
-if sys.stderr.isatty():          # under launchd stderr is bridge.out, which only needs crashes
+if sys.stderr and sys.stderr.isatty():   # under launchd stderr is bridge.out, which only needs crashes
     log.addHandler(logging.StreamHandler())
 
 
@@ -153,11 +160,11 @@ class Device:
 
     @staticmethod
     def usb_ports():
-        return sorted(glob.glob("/dev/cu.usbmodem*"))
+        return lump_ports.usb_ports()
 
     def _targets(self):
-        if os.environ.get("DESKBUDDY_PORT"):
-            return [os.environ["DESKBUDDY_PORT"]]
+        if lump_ports.pinned():            # DESKBUDDY_PORT, or "serial_port" in config.json
+            return [lump_ports.pinned()]
         cfg = read_config()
         net = [f"socket://{cfg.get('lump_host') or 'lump.local'}:{NET_PORT}"] if cfg.get("lump_token") else []
         return self.usb_ports() + net
@@ -217,7 +224,7 @@ class Device:
                 time.sleep(0.3); self._call(self.on_ready)
             if self.link == "wifi" and time.time() - usb_checked > self.USB_CHECK:
                 usb_checked = time.time()
-                if self.usb_ports() and not os.environ.get("DESKBUDDY_PORT"):
+                if self.usb_ports() and not lump_ports.pinned():
                     self._drop("USB cable found: switching from Wi-Fi"); continue
             try:
                 buf += self.ser.read(256)
@@ -326,7 +333,7 @@ APP_SUPPORT = os.path.expanduser("~/Library/Application Support")
 
 def account_of_config(path):
     """The account behind a Claude Code path, e.g. a hook's transcript_path (~/.claude-work/... -> work)."""
-    m = re.search(r"/\.claude-([^/]+)/", path or "")
+    m = re.search(r"[/\\]\.claude-([^/\\]+)[/\\]", path or "")   # / on macOS, \ on Windows
     return m.group(1).lower() if m else PERSONAL
 
 
@@ -367,7 +374,9 @@ class Focus:
         self.account, self.last_account = None, PERSONAL   # the Claude copy in front (None: none is), and the last one that was
         self.focused = {}                                 # account -> cli session id showing in that copy's Code tab
         self._pids = {}
-        if start:
+        if start and IS_WIN:
+            log.info("focus: not on Windows yet (finished sessions stay unread until you're back in them)")
+        elif start:
             threading.Thread(target=self._run, daemon=True).start()
 
     @property
@@ -446,8 +455,43 @@ class Focus:
             time.sleep(1.5)
 
 
+def scaled_wav(path, volume):
+    """winsound has no volume control, so on Windows each sound is played from a copy with its samples
+    scaled (sounds/.vol/<name>@<volume>.wav), made once per volume and remade if the original changes.
+    Above 1.0 it's louder, clipped like afplay. Anything unexpected: the original, at full volume."""
+    try:
+        volume = round(float(volume), 2)
+    except (TypeError, ValueError):
+        return path
+    if volume == 1.0:
+        return path
+    folder = os.path.join(os.path.dirname(path), ".vol")
+    out = os.path.join(folder, f"{os.path.basename(path)[:-4]}@{volume:.2f}.wav")
+    try:
+        if os.path.exists(out) and os.path.getmtime(out) >= os.path.getmtime(path):
+            return out
+        with wave.open(path) as w:
+            params, frames = w.getparams(), w.readframes(w.getnframes())
+        if params.sampwidth != 2:                     # make_sounds.py writes 16-bit: anything else as is
+            return path
+        a = array.array("h", frames)
+        if sys.byteorder == "big": a.byteswap()
+        for i, v in enumerate(a):
+            a[i] = max(-32768, min(32767, int(v * volume)))
+        if sys.byteorder == "big": a.byteswap()
+        os.makedirs(folder, exist_ok=True)
+        tmp = out + ".tmp"
+        with wave.open(tmp, "wb") as w:
+            w.setparams(params); w.writeframes(a.tobytes())
+        os.replace(tmp, out)
+        return out
+    except Exception as e:
+        log.info("can't make %s: %s", out, e)
+        return out if os.path.exists(out) else path
+
+
 class Sounds:
-    """Plays Lump's voice through afplay. Settings are re-read whenever sounds.json changes, so
+    """Plays Lump's voice through afplay (macOS) or winsound (Windows). Settings are re-read whenever sounds.json changes, so
     flipping "enabled" (Claude Switcher, POST /sound, or by hand) takes effect immediately.
       {"enabled": true, "volume": 1.0, "quiet_at_night": true,
        "moments": {"needs_you": {"on": true, "pick": ["a", "c"]}, ...}}
@@ -506,18 +550,25 @@ class Sounds:
             if not os.path.exists(path):
                 log.info("sound %s missing (run tools/make_sounds.py)", path)
                 return False
-            if self.proc and self.proc.poll() is None:
-                self.proc.terminate()                         # one voice at a time
             try:
-                self.proc = subprocess.Popen(["afplay", "-v", str(cfg.get("volume", 1.0)), path],
-                                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self._start(path, cfg.get("volume", 1.0))
             except Exception as e:
-                log.info("afplay failed: %s", e); return False
+                log.info("playing a sound failed: %s", e); return False
             self.last_any = self.last_at[moment] = now
             self.last_pick[moment] = k
             log.info("sound %s %s", moment, k)
             return True
 
+
+    def _start(self, path, volume):
+        """Start playing a WAV, cutting off whatever is playing: one voice at a time."""
+        if IS_WIN:
+            import winsound                               # a new async sound replaces the one playing
+            winsound.PlaySound(scaled_wav(path, volume), winsound.SND_FILENAME | winsound.SND_ASYNC | winsound.SND_NODEFAULT)
+            return
+        if self.proc and self.proc.poll() is None:
+            self.proc.terminate()
+        self.proc = subprocess.Popen(["afplay", "-v", str(volume), path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
     def play_gag(self, event, force=False):
         """The board started a gag (event "tap_<gag>_<mood>"): play its sound in step with the drawings,
@@ -549,12 +600,10 @@ class Sounds:
     def _start_gag(self, path, gag):
         with self.lock:
             volume = self.settings().get("volume", 1.0)          # read now, so a just-moved slider counts
-            if self.proc and self.proc.poll() is None:
-                self.proc.terminate()                         # one voice at a time
             try:
-                self.proc = subprocess.Popen(["afplay", "-v", str(volume), path], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                self._start(path, volume)
             except Exception as e:
-                log.info("afplay failed: %s", e); return
+                log.info("playing a sound failed: %s", e); return
             self.last_any = time.time()
             log.info("sound gag %s (volume %s)", gag, volume)
 
@@ -1317,6 +1366,8 @@ class SlackWatch:
     def slack_in_front():
         """Is Slack the app you're using right now? (Then a plane is just noise, and a VIP message you're
         reading as it lands shouldn't get the whole letter routine.)"""
+        if IS_WIN:
+            return False                           # no front-app check on Windows yet
         try:
             asn = subprocess.run(["lsappinfo", "front"], capture_output=True, text=True, timeout=2).stdout.strip()
             out = subprocess.run(["lsappinfo", "info", "-only", "bundleID", asn], capture_output=True, text=True, timeout=2).stdout
@@ -1492,10 +1543,18 @@ class Handler(http.server.BaseHTTPRequestHandler):
             self._reply(404)
 
 
+class Server(http.server.ThreadingHTTPServer):
+    # On Windows SO_REUSEADDR lets a second bridge bind the same port and steal half the hooks:
+    # there a bridge that's already running must make this one fail instead.
+    allow_reuse_address = not IS_WIN
+
+
 if __name__ == "__main__":
+    if sys.stderr is None:                 # pythonw (the Windows scheduled task) has no console: crashes go here
+        sys.stdout = sys.stderr = open(os.path.join(HOME, "bridge.out"), "a", buffering=1)
     buddy = Buddy()
     buddy.app = AppPages(buddy)
     buddy.calendar = Calendar()
     buddy.slack = SlackWatch(buddy)
     log.info("desk-buddy bridge listening on 127.0.0.1:%d", HTTP_PORT)
-    http.server.ThreadingHTTPServer(("127.0.0.1", HTTP_PORT), Handler).serve_forever()
+    Server(("127.0.0.1", HTTP_PORT), Handler).serve_forever()

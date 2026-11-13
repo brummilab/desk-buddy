@@ -1,8 +1,10 @@
 """Put Lump on your Wi-Fi.
 
-Run it yourself with the board plugged into the Mac by USB (data cable):
+Run it yourself with the board plugged into the computer by USB (data cable):
     ~/.desk-buddy/venv/bin/python tools/wifi_setup.py          # set up / change network
     ~/.desk-buddy/venv/bin/python tools/wifi_setup.py --forget # turn Wi-Fi off again
+On Windows (PowerShell):
+    ~/.desk-buddy/venv/Scripts/python.exe tools/wifi_setup.py
 
 It asks for the network name and password (the password isn't shown, logged or saved on the Mac:
 it goes straight over USB into the board's own flash), makes a pairing token so only your
@@ -14,24 +16,41 @@ import getpass, glob, json, os, re, secrets, subprocess, sys, time
 
 import serial
 
-HOME = os.path.expanduser("~/.desk-buddy")
-CONFIG = os.path.join(HOME, "config.json")
-BRIDGE = "com.deskbuddy.bridge"
-BRIDGE_PLIST = os.path.expanduser(f"~/Library/LaunchAgents/{BRIDGE}.plist")
+import lump_ports
+
+HOME = lump_ports.HOME
+CONFIG = lump_ports.CONFIG
+
+
+def tz_footer(data):
+    """The POSIX rule at the end of a TZif file (e.g. CET-1CEST,M3.5.0,M10.5.0/3), or ""."""
+    footer = data.rstrip(b"\n").rsplit(b"\n", 1)[-1].decode(errors="replace")
+    return footer if re.fullmatch(r"[A-Za-z<>+\-0-9,./:]+", footer) else ""
 
 
 def posix_tz():
-    """Your time zone as a POSIX rule (e.g. EST5EDT,M3.2.0,M11.1.0), from the footer of
-    /etc/localtime, which is what the ESP32's clock understands."""
+    """Your time zone as a POSIX rule (e.g. EST5EDT,M3.2.0,M11.1.0), which is what the ESP32's clock
+    understands. macOS: the footer of /etc/localtime. Windows has no such file: tzlocal turns its time
+    zone into an IANA name (Europe/Vienna), and the tzdata package has that zone's TZif file."""
     try:
-        data = open("/etc/localtime", "rb").read()
-        footer = data.rstrip(b"\n").rsplit(b"\n", 1)[-1].decode()
-        return footer if re.fullmatch(r"[A-Za-z<>+\-0-9,./:]+", footer) else ""
+        if not lump_ports.IS_WIN:
+            return tz_footer(open("/etc/localtime", "rb").read())
+        import importlib.resources, tzlocal
+        name = tzlocal.get_localzone_name()
+        res = importlib.resources.files("tzdata.zoneinfo").joinpath(*name.split("/"))
+        return tz_footer(res.read_bytes())
     except Exception:
         return ""
 
 
 def current_ssid():
+    if lump_ports.IS_WIN:
+        try:
+            out = subprocess.run(["netsh", "wlan", "show", "interfaces"], capture_output=True, text=True, timeout=3).stdout
+            m = re.search(r"^\s*SSID\s*:\s*(.+)$", out, re.M)      # not "BSSID": that line starts with B
+            return m.group(1).strip() if m else ""
+        except Exception:
+            return ""
     try:
         out = subprocess.run(["ipconfig", "getsummary", "en0"], capture_output=True, text=True, timeout=3).stdout
         m = re.search(r"^\s*SSID : (.+)$", out, re.M)
@@ -58,9 +77,10 @@ def read_lines(ser, until, secs):
 
 def main():
     forget = "--forget" in sys.argv
-    ports = sorted(glob.glob("/dev/cu.usbmodem*"))
+    ports = ([lump_ports.pinned()] if lump_ports.pinned() else []) + lump_ports.usb_ports()
     if not ports:
-        sys.exit("Lump isn't plugged in by USB (needs a data cable).")
+        sys.exit("Lump isn't plugged in by USB (needs a data cable)."
+                 + ("\nCheck: py tools/lump_ports.py -v" if lump_ports.IS_WIN else ""))
     cfg = {}
     if os.path.exists(CONFIG):
         with open(CONFIG) as f:
@@ -81,9 +101,7 @@ def main():
         line = f"w {ssid}\t{password}\t{token}\t{tz}"
 
     # the bridge holds the USB port: pause it while we talk to the board
-    subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/{BRIDGE}"], capture_output=True)
-    time.sleep(1)
-    try:
+    with lump_ports.bridge_paused():
         ser = serial.Serial(); ser.port, ser.baudrate, ser.timeout = ports[0], 115200, 0.3
         ser.dtr = False; ser.rts = False
         ser.open()
@@ -116,13 +134,11 @@ def main():
             time.sleep(1)
         ser.close()
         if status and "wifi=connected" in status:
-            print("\nLump is on Wi-Fi. Unplug him from the Mac and power him from any USB charger:")
+            print("\nLump is on Wi-Fi. Unplug him from the computer and power him from any USB charger:")
             print("the bridge will find him at lump.local within a few seconds.")
         else:
             print("\nHe saved the details but hasn't joined yet. Check the network name and password")
             print("(and that it's a 2.4 GHz network), then run this again.")
-    finally:
-        subprocess.run(["launchctl", "bootstrap", f"gui/{os.getuid()}", BRIDGE_PLIST], capture_output=True)
 
 
 if __name__ == "__main__":
