@@ -10,6 +10,7 @@
 | Datum | Eintrag |
 |---|---|
 | 2026-11-13 | Grill-me-Befragung zur Windows-Brücke geführt, Stufe 1 umgesetzt (Branch `claude/friendly-curie-xs7i7b`). Mit Unit-Tests geprüft (101 Tests grün); auf echter Hardware noch nicht getestet, das Board ist bestellt. |
+| 2026-11-13 | Entscheidung: Kein PR auf `main`, bis der Hardwaretest gelaufen ist. Danach Stufe 2 (Fokus) starten. |
 
 ## Setup (David)
 
