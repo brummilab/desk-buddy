@@ -1,7 +1,7 @@
 """Lump Control: a small Windows tray app to test Lump and change his settings.
 
 A tray icon (right-click: open, play an animation, sound on/off, restart the bridge) and a window: on the
-left Lump himself, live (his mood in his colour, from the same baked frames as the Mac menu-bar Lump), with
+left Lump himself, live (his mood in his colour, from the board's own frames in lump.bin), with
 his counters and usage; on the right Status (sessions), Play (gags, mood previews, tap sensitivity), Sounds
 and Settings (colour, Wi-Fi host, calendar, Slack), in dark or light mode. It only talks to the bridge's own
 HTTP API on 127.0.0.1:47823 and edits ~/.desk-buddy/config.json and sounds.json, which the bridge re-reads by
