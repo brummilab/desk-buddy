@@ -211,7 +211,7 @@ function renderUsage(st) {
 }
 
 // Claude apps card: names are editable; usual and running ones stay listed, added folders can be removed
-let appsKey = "", appsDraft = null;
+let appsKey = "", appsDraft = null, appsList = [];               // appsList: the card's rows, as edited
 function renderApps(apps) {
   if (appsDraft) return;                                                 // being edited: leave it alone
   const key = JSON.stringify(apps || []);
@@ -220,6 +220,7 @@ function renderApps(apps) {
   drawApps((apps || []).map((a) => ({ ...a })));
 }
 function drawApps(list) {
+  appsList = list;
   const badge = { usual: "usual folder", configured: "added", running: "found running" };
   $("apps").replaceChildren(...list.map((a, i) => el("div", { class: "app-row" },
     el("input", { type: "text", value: a.name, "aria-label": "Name for " + a.path,
@@ -229,7 +230,6 @@ function drawApps(list) {
     a.source === "configured"
       ? el("button", { class: "btn", type: "button", onclick: () => { appsDraft = list; list.splice(i, 1); drawApps(list); } }, "Remove")
       : el("span", {}))));
-  $("apps").dataset.list = JSON.stringify(list);
 }
 
 let momentsKey = "";
@@ -298,14 +298,14 @@ function wire() {
   $("apps-add").addEventListener("click", async () => {
     const path = await api().pick_folder();
     if (!path) return;
-    const list = JSON.parse($("apps").dataset.list || "[]");
+    const list = appsList;
     if (!list.some((a) => a.path.toLowerCase() === path.toLowerCase())) {
       list.push({ name: path.split(/[\\/]/).filter(Boolean).pop() || "Claude", path, source: "configured", account: "" });
     }
     appsDraft = list; drawApps(list);
   });
   $("apps-save").addEventListener("click", async () => {
-    const list = JSON.parse($("apps").dataset.list || "[]");
+    const list = appsList;
     const keep = list.filter((a) => a.source !== "usual" || !/^(main|work)$/i.test(a.name)).map((a) => ({ name: a.name, path: a.path }));
     const res = await api().save_apps(keep);
     toast(res);

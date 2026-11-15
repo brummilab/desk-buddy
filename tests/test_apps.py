@@ -59,9 +59,16 @@ class Apps(unittest.TestCase):
         self.assertEqual(self.accounts()["rentals"], ("Rentals", "running"))
         self.assertEqual(len(self.apps.list()), 3)
 
-    def test_names_never_clash_with_the_usual_accounts(self):
-        self.config([{"name": "Work", "path": self.rentals}])
-        self.assertIn("work-2", self.accounts())
+    def test_accounts_never_clash_with_the_usual_ones(self):
+        work = os.path.join(self.root, "other", "work"); os.makedirs(work)
+        self.config([{"name": "Laptop", "path": work}])
+        self.assertEqual(self.accounts()["work-2"], ("Laptop", "configured"))
+
+    def test_renaming_keeps_the_account(self):
+        self.config([{"name": "Rentals", "path": self.rentals}])
+        self.assertEqual(self.accounts()["rentals"], ("Rentals", "configured"))
+        self.config([{"name": "Office PC", "path": self.rentals}])
+        self.assertEqual(self.accounts()["rentals"], ("Office PC", "configured"))
 
     def test_each_app_feeds_its_own_usage(self):
         self.config([{"name": "Rentals", "path": self.rentals}])

@@ -421,7 +421,8 @@ class ClaudeApps:
     config.json "claude_apps" ([{"name", "path"}], from Lump Control's Settings) for a copy kept somewhere else,
     and on Windows any running copy started with its own --user-data-dir (found from the process list), so a
     second app shows up without setting anything. A folder's account: "personal" for the usual Claude folder,
-    "work" for Claude-Work, else from the name it's given (or its folder name)."""
+    "work" for Claude-Work, else its folder's name, so renaming an app only changes its label (its usage
+    readings stay under the same account)."""
 
     def __init__(self, support=None):
         self.support, self.running = support, {}          # normalised folder -> folder, of running copies seen
@@ -485,8 +486,8 @@ class ClaudeApps:
             if key in seen:
                 continue
             seen.add(key)
-            name = name or os.path.basename(path.rstrip("\\/")).capitalize() or "Claude"
-            acct = app_slug(name)
+            folder = os.path.basename(path.rstrip("\\/")) or "Claude"
+            name, acct = name or folder.capitalize(), app_slug(folder)      # renaming changes the label only
             while acct in used or acct == PERSONAL:
                 acct += "-2"
             used.add(acct)
