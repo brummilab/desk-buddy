@@ -1,0 +1,238 @@
+// Lump Control's page. Everything it knows or changes goes through window.pywebview.api (class Api in
+// control.py); it polls the bridge's state once a second and mirrors Lump: his mood, painted in his colour
+// from the same baked frames the Mac menu-bar Lump uses (glow ink in dark mode, paper ink in light).
+"use strict";
+
+const SWATCHES = [["Tangerine", "FF7A45"], ["Lemon", "FFC93C"], ["Mint", "3DD68C"], ["Sky", "4FA8FF"],
+                  ["Grape", "9B6BFF"], ["Bubblegum", "FF6FB5"], ["Cherry", "E8334A"]];
+const MOODS = [["idle", "Idle"], ["awake", "Awake"], ["working", "Working"], ["alert", "Needs you"], ["waiting", "Waiting"],
+               ["done", "Done"], ["longhaul", "Long haul"], ["night", "Night"], ["letter", "VIP letter"], ["meeting", "Meeting"]];
+const MOOD_LABEL = Object.fromEntries(MOODS);
+const STATE_LABEL = { working: "Working", alert: "Needs you", done: "Finished", idle: "Idle", snoozed: "Snoozed" };
+const LINK_LABEL = { usb: "Plugged in by USB", wifi: "On Wi-Fi", relay: "On the remote link" };
+
+const $ = (id) => document.getElementById(id);
+const api = () => window.pywebview.api;
+let latest = null, formFilled = false, themeSet = false, animationsShown = false;
+
+// ---------- small helpers ----------
+let toastTimer = null;
+function toast(res) {
+  if (!res || !res.message) return;
+  const t = $("toast");
+  t.textContent = res.message;
+  t.classList.toggle("error", res.ok === false);
+  t.classList.remove("hidden");
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.add("hidden"), 3500);
+}
+async function act(promise) { try { toast(await promise); } catch (e) { toast({ ok: false, message: String(e) }); } }
+function el(tag, attrs, ...kids) {
+  const n = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs || {})) {
+    if (k === "class") n.className = v;
+    else if (k.startsWith("on")) n.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) n.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids) n.append(k);
+  return n;
+}
+function rgb(hex) { const h = (hex || "FF7A45").replace("#", ""); return [0, 2, 4].map((i) => parseInt(h.slice(i, i + 2), 16) || 0); }
+function setAccent(hex) {
+  const [r, g, b] = rgb(hex), s = document.documentElement.style;
+  s.setProperty("--accent", "#" + hex.replace("#", ""));
+  s.setProperty("--accent-soft", `rgba(${r},${g},${b},0.22)`);
+  s.setProperty("--accent-glow", `rgba(${r},${g},${b},0.32)`);
+}
+function age(s) { return s >= 3600 ? Math.floor(s / 3600) + "h" : s >= 60 ? Math.floor(s / 60) + "m" : s + "s"; }
+
+// ---------- Lump, live ----------
+// The board's own frames (lump.bin, 240 x 240): run-length data, [count][RGB565 byte-swapped], recoloured the way
+// the firmware does it (firmware/src/main.cpp, recolor): his body is drawn in magenta, mixed with the cream line.
+const lump = { key: "", frames: [], ticks: [0], fps: 24, start: performance.now(), loading: "" };
+function recolour(stored, tint) {
+  const v = ((stored >> 8) | (stored << 8)) & 0xffff;
+  const r = (v >> 11) << 3, g = ((v >> 5) & 63) << 2, b = (v & 31) << 3;
+  if (r < 8 && g < 8 && b < 8) return [r, g, b];                          // black stays black
+  const beta = g / 241, alpha = r / 255 - beta;
+  if (alpha <= 0.02) return [r, g, b];                                    // pure line colour
+  if (b < alpha * 255 + beta * 220 - 48) return [r, g, b];                // a real colour (the banana): kept
+  return [Math.min(255, alpha * tint[0] + beta * 255), Math.min(255, alpha * tint[1] + beta * 241), Math.min(255, alpha * tint[2] + beta * 220)];
+}
+function decodeFrame(b64, tint, cache) {
+  const bin = atob(b64), img = new ImageData(240, 240), px = img.data;
+  let i = 0;
+  for (let p = 0; p + 2 < bin.length && i < 57600; p += 3) {
+    const n = bin.charCodeAt(p), stored = bin.charCodeAt(p + 1) | (bin.charCodeAt(p + 2) << 8);
+    let c = cache.get(stored);
+    if (!c) { c = recolour(stored, tint); cache.set(stored, c); }
+    for (let k = 0; k < n && i < 57600; k++, i++) { const o = i * 4; px[o] = c[0]; px[o + 1] = c[1]; px[o + 2] = c[2]; px[o + 3] = 255; }
+  }
+  const fc = document.createElement("canvas"); fc.width = 240; fc.height = 240;
+  fc.getContext("2d").putImageData(img, 0, 0);
+  return fc;
+}
+const screens = new Map();                                               // mood -> the board's data for its loop
+async function showLump(mood, colour) {
+  const key = `${mood}|${colour}`;
+  if (key === lump.key || key === lump.loading) return;
+  lump.loading = key;
+  if (!screens.has(mood)) screens.set(mood, await api().screen(mood));
+  const s = screens.get(mood);
+  if (!s || lump.loading !== key) { if (lump.loading === key) lump.loading = ""; return; }
+  const tint = rgb(colour), cache = new Map();
+  const frames = s.frames.map((f) => decodeFrame(f, tint, cache));
+  if (lump.loading !== key) return;
+  Object.assign(lump, { key, frames, ticks: s.ticks, fps: s.fps, loading: "" });
+}
+function drawLump(now) {
+  const cv = $("lump"), x = cv.getContext("2d");
+  if (lump.frames.length) {
+    const tick = Math.floor((now - lump.start) / 1000 * lump.fps) % lump.ticks.length;
+    x.drawImage(lump.frames[lump.ticks[tick]] || lump.frames[0], 0, 0);
+  }
+  requestAnimationFrame(drawLump);
+}
+
+// ---------- rendering the state ----------
+function theme() { return document.documentElement.dataset.theme || "dark"; }
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  const next = t === "dark" ? "light" : "dark";
+  $("theme").setAttribute("aria-label", `Switch to ${next} mode`);
+  $("theme").title = `Switch to ${next} mode`;
+}
+
+function render(s) {
+  latest = s;
+  if (!themeSet) { applyTheme(s.theme); themeSet = true; }
+  const st = s.status, up = !!st, board = up && st.device;
+  const colour = (up && st.colour) || s.colour;
+  setAccent(colour);
+
+  const live = $("live");
+  live.className = "live " + (board ? "ok" : up ? "warn" : "");
+  $("live-text").textContent = board ? "Live" : up ? "Board not connected" : "Bridge not running";
+  $("start-bridge").classList.toggle("hidden", up);
+  $("halo").classList.toggle("offline", !board);
+
+  const mood = board ? st.mood : "idle";
+  $("mood").textContent = board ? (MOOD_LABEL[st.mood] || st.mood) : up ? "Offline" : "Asleep";
+  $("link").textContent = board ? (LINK_LABEL[st.link] || "Connected") : up ? "Plug him in, or check Wi-Fi" : "Lump can't hear from Claude";
+  showLump(mood, colour);
+
+  const c = (up && st.counts) || {};
+  $("n-working").textContent = c.working || 0; $("n-alert").textContent = c.alert || 0; $("n-unseen").textContent = c.unseen || 0;
+  const usage = (up && st.usage) || {};
+  for (const [key, id] of [["five_hour", "u5"], ["seven_day", "u7"]]) {
+    const vals = Object.entries(usage).filter(([k]) => k === key || k.endsWith(":" + key)).map(([, v]) => v.pct).filter((v) => v != null);
+    const pct = vals.length ? Math.max(...vals) : null;
+    $(id).textContent = pct == null ? "–" : Math.round(pct) + "%";
+    $(id + "-bar").style.width = (pct == null ? 0 : Math.min(100, pct)) + "%";
+  }
+
+  // status page
+  const sess = Object.entries((up && st.sessions) || {}).sort((a, b) => a[1].age_s - b[1].age_s);
+  $("sessions").replaceChildren(...sess.map(([id, v]) => el("div", { class: "item" },
+    el("span", { class: "sdot " + v.state }),
+    el("span", { class: "name", title: v.cwd || id }, (v.cwd || "").split(/[\\/]/).filter(Boolean).pop() || id),
+    el("span", { class: "meta" }, STATE_LABEL[v.state] || v.state),
+    el("span", { class: "meta" }, age(v.age_s)))));
+  $("no-sessions").classList.toggle("hidden", sess.length > 0 || !up);
+
+  // play page
+  for (const b of document.querySelectorAll(".tile")) b.classList.toggle("current", board && b.dataset.mood === st.mood);
+  if (!animationsShown && up) loadAnimations();
+  if (!document.activeElement || document.activeElement.id !== "tap") { $("tap").value = s.tap; $("tap-value").textContent = Number(s.tap).toFixed(2) + " g"; }
+
+  // sounds page
+  $("snd-on").checked = s.sounds.enabled;
+  $("snd-quiet").checked = s.sounds.quiet_at_night;
+  if (document.activeElement !== $("snd-vol")) { $("snd-vol").value = s.sounds.volume; $("snd-vol-value").textContent = Math.round(s.sounds.volume * 100) + "%"; }
+  renderMoments(s.sounds.moments);
+
+  // settings page
+  for (const b of document.querySelectorAll(".swatch")) b.classList.toggle("current", b.dataset.hex === s.colour);
+  $("colour-pick").value = "#" + s.colour.toLowerCase();
+  $("pairing").textContent = s.settings.lump_paired ? "Wi-Fi pairing: set up" : "Wi-Fi pairing: not set up (run tools\\wifi_setup.py with him plugged in)";
+  if (!formFilled) {
+    const f = $("settings-form");
+    for (const [k, v] of Object.entries(s.settings)) if (f.elements[k]) f.elements[k].value = v;
+    formFilled = true;
+  }
+}
+
+let momentsKey = "";
+function renderMoments(moments) {
+  const key = JSON.stringify(moments);
+  if (key === momentsKey) return;
+  momentsKey = key;
+  $("moments").replaceChildren(...Object.entries(moments).map(([name, on]) => {
+    const sw = el("input", { type: "checkbox", class: "switch", "aria-label": name.replace(/_/g, " "),
+      onchange: (e) => act(api().set_moment(name, e.target.checked)) });
+    sw.checked = on;
+    return el("div", { class: "item moment" },
+      el("span", { class: "name" }, name.replace(/_/g, " ").replace(/^./, (m) => m.toUpperCase())),
+      el("button", { class: "btn", type: "button", "aria-label": "Play " + name.replace(/_/g, " "), onclick: () => act(api().play_sound(name)) }, "Play"),
+      sw);
+  }));
+}
+
+async function loadAnimations() {
+  animationsShown = true;
+  const list = await api().animations();
+  if (!list.length) { animationsShown = false; return; }
+  $("animations").replaceChildren(...list.map((a) => el("button", { class: "chip", type: "button", onclick: () => act(api().play(a.name)) }, a.label)));
+}
+
+async function poll() {
+  try { render(await api().state()); } catch (e) { /* the window is closing */ }
+  setTimeout(poll, 1000);
+}
+
+// ---------- wiring ----------
+function wire() {
+  for (const tab of document.querySelectorAll(".tab")) {
+    tab.addEventListener("click", () => {
+      for (const t of document.querySelectorAll(".tab")) t.setAttribute("aria-selected", String(t === tab));
+      for (const p of document.querySelectorAll(".page")) p.classList.toggle("hidden", p.id !== "page-" + tab.dataset.tab);
+    });
+  }
+  $("theme").addEventListener("click", () => {
+    const t = theme() === "dark" ? "light" : "dark";
+    applyTheme(t); api().set_theme(t);
+    if (latest) render(latest);
+  });
+  $("start-bridge").addEventListener("click", () => act(api().bridge_ctl("start")));
+  for (const b of document.querySelectorAll("[data-bridge]")) b.addEventListener("click", () => act(api().bridge_ctl(b.dataset.bridge)));
+  for (const b of document.querySelectorAll("[data-open]")) b.addEventListener("click", () => act(api().open(b.dataset.open)));
+
+  $("moods").replaceChildren(...MOODS.map(([m, label]) => el("button", { class: "tile", type: "button", "data-mood": m, onclick: () => act(api().preview(m)) }, label)));
+  $("showcase").addEventListener("click", () => act(api().preview("demo")));
+  $("back-live").addEventListener("click", () => act(api().live()));
+  $("tap").addEventListener("input", (e) => { $("tap-value").textContent = Number(e.target.value).toFixed(2) + " g"; });
+  $("tap-apply").addEventListener("click", () => act(api().set_tap(Number($("tap").value))));
+  $("tap-default").addEventListener("click", () => { $("tap").value = 0.35; $("tap-value").textContent = "0.35 g"; act(api().set_tap(0.35)); });
+
+  $("snd-on").addEventListener("change", (e) => act(api().set_sound(e.target.checked)));
+  $("snd-quiet").addEventListener("change", (e) => act(api().set_quiet(e.target.checked)));
+  $("snd-vol").addEventListener("input", (e) => { $("snd-vol-value").textContent = Math.round(e.target.value * 100) + "%"; });
+  $("snd-vol").addEventListener("change", (e) => act(api().set_volume(Number(e.target.value))));
+  $("snd-test").addEventListener("click", () => act(api().play_sound("hello")));
+
+  $("swatches").replaceChildren(...SWATCHES.map(([name, hex]) => el("button", { class: "swatch", type: "button", "data-hex": hex,
+    "aria-label": name, title: name, style: `background:#${hex}`, onclick: () => act(api().set_colour(hex)) })));
+  $("colour-pick").addEventListener("change", (e) => act(api().set_colour(e.target.value.replace("#", "").toUpperCase())));
+  $("colour-reset").addEventListener("click", () => act(api().set_colour(null)));
+
+  $("settings-form").addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const f = e.target, values = {};
+    for (const k of ["lump_host", "calendar_ics", "my_email", "slack_token", "slack_vips", "slack_vip_minutes"]) values[k] = f.elements[k].value;
+    await act(api().save_settings(values));
+  });
+}
+
+function start() { wire(); requestAnimationFrame(drawLump); poll(); }
+if (window.pywebview && window.pywebview.api) start();
+else window.addEventListener("pywebviewready", start, { once: true });

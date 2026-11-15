@@ -45,8 +45,13 @@ if (-not (Test-Path $Python)) {
     else { throw "Python 3 isn't installed: get it from python.org (or the Microsoft Store), then run this again." }
 }
 Invoke-Checked $Python @("-m", "pip", "-q", "install", "--disable-pip-version-check", "--upgrade", "pip")
-Invoke-Checked $Python @("-m", "pip", "-q", "install", "--disable-pip-version-check", "pyserial", "psutil", "icalendar", "recurring-ical-events", "pystray", "pillow")
+Invoke-Checked $Python @("-m", "pip", "-q", "install", "--disable-pip-version-check", "pyserial", "psutil", "icalendar", "recurring-ical-events", "pystray", "pillow", "pywebview")
 Copy-Item (Join-Path $Root "tools\buddy_bridge.py") (Join-Path $RT "bridge.py") -Force
+# Lump Control's window (an HTML page shown in WebView2) and the board's own drawings, which it shows him with
+New-Item -ItemType Directory -Force (Join-Path $RT "ui") | Out-Null
+Copy-Item (Join-Path $Root "tools\windows\ui\*") (Join-Path $RT "ui") -Force
+Copy-Item (Join-Path $Root "firmware\data\lump.bin") (Join-Path $RT "ui\lump.bin") -Force
+Remove-Item (Join-Path $RT "lump.ico") -ErrorAction SilentlyContinue      # remade from lump_icon.png on next start
 Copy-Item (Join-Path $Root "tools\windows\keepalive.py") (Join-Path $RT "keepalive.py") -Force
 Copy-Item (Join-Path $Root "tools\windows\control.py") (Join-Path $RT "control.py") -Force
 Copy-Item (Join-Path $Root "tools\windows\bridge.ps1") (Join-Path $RT "bridge.ps1") -Force

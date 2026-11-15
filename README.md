@@ -119,10 +119,12 @@ python tools\install_hooks.py
 ```
 
 **Lump Control.** The installer also puts a small Lump in your system tray (it starts at logon too). Click
-him for a window that shows what he's showing and why (sessions, usage, link), plays any animation,
-previews moods, sets tap sensitivity, switches sounds and individual moments on and off, and edits the
-Wi-Fi host, calendar and Slack settings. Right-click for quick play, sound on/off and restarting the
-bridge. It only talks to the bridge's local API and its settings files, so changes apply straight away.
+him for a window with Lump himself on the left, live: the board's own frames in his current mood and colour,
+with his counters and usage. On the right: Status (sessions), Play (every gag, mood previews, tap
+sensitivity), Sounds (on/off, volume, each moment) and Settings (body colour, Wi-Fi host, calendar, Slack),
+in dark or light mode. Right-click for quick play, sound on/off and restarting the bridge. The window is a
+small HTML page in Windows' own WebView2 (pywebview); it only talks to the bridge's local API and its
+settings files, so changes apply straight away.
 
 How it differs from the Mac: his usage colour also follows the desktop app (which has no status line) by
 reading its own usage history, sounds play through Windows, and Chat and Cowork states aren't tracked

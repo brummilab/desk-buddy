@@ -1,14 +1,19 @@
 """Lump Control: a small Windows tray app to test Lump and change his settings.
 
-A tray icon (right-click: open, play an animation, sound on/off, restart the bridge) and a window with
-four tabs: Status (what he's showing and why), Play (animations, mood previews, tap sensitivity), Sounds
-and Settings (Wi-Fi host, calendar, Slack). It only talks to the bridge's own HTTP API on 127.0.0.1:47823
-and edits ~/.desk-buddy/config.json and sounds.json, which the bridge re-reads by itself, so nothing here
-needs the bridge restarted. With the bridge stopped it says so and offers to start it.
+A tray icon (right-click: open, play an animation, sound on/off, restart the bridge) and a window: on the
+left Lump himself, live (his mood in his colour, from the same baked frames as the Mac menu-bar Lump), with
+his counters and usage; on the right Status (sessions), Play (gags, mood previews, tap sensitivity), Sounds
+and Settings (colour, Wi-Fi host, calendar, Slack), in dark or light mode. It only talks to the bridge's own
+HTTP API on 127.0.0.1:47823 and edits ~/.desk-buddy/config.json and sounds.json, which the bridge re-reads by
+itself, so nothing here needs the bridge restarted. With the bridge stopped it says so and offers to start it.
+
+The window is an HTML page (tools/windows/ui/) shown in Windows' own WebView2 through pywebview; the page
+asks Python for everything through class Api. Without pywebview it falls back to the older Tk window
+(ControlWindow), which `--tk` also forces.
 
 tools/windows/install.ps1 installs it as ~/.desk-buddy/control.py and starts it at logon (pythonw, no
-console). Run by hand: ~/.desk-buddy/venv/Scripts/pythonw tools/windows/control.py
-Needs pystray and Pillow for the tray icon (installed by install.ps1); without them it's just the window.
+console). Run by hand: ~/.desk-buddy/venv/Scripts/pythonw tools/windows/control.py [--show]
+Needs pywebview, pystray and Pillow (installed by install.ps1).
 """
 import json, os, socket, subprocess, sys, threading, time, urllib.error, urllib.request
 
@@ -467,8 +472,216 @@ class ControlWindow:
         self.root.withdraw()
 
 
+# ---------- the new window: an HTML page in Windows' own WebView2 (pywebview) ----------
+# The page (tools/windows/ui/) draws everything; Python only answers its questions through Api below, so the
+# page never touches files or the network itself, and no port is opened for it. Without pywebview (or WebView2)
+# the older Tk window above is used instead.
+HERE = os.path.dirname(os.path.abspath(__file__))
+UI_DIRS = (os.path.join(HOME, "ui"), os.path.join(HERE, "ui"))
+# Lump's drawings: the very file the board plays (240 x 240 frames), so the window shows what's on the glass
+ART_FILES = (os.path.join(HOME, "ui", "lump.bin"), os.path.join(os.path.dirname(os.path.dirname(HERE)), "firmware", "data", "lump.bin"))
+GAG_NAMES = {"tap": "Random gag", "moto": "Ring of fire", "wolf": "Wolf howl", "glass": "Face on the glass",
+             "banana": "Banana peel", "balloon": "Balloon pop", "moon": "Mooning", "bomb": "Cartoon bomb",
+             "startle": "Late-night startle", "prep": "Meeting prep", "fidget_toss": "Fidget: toss",
+             "fidget_twitch": "Fidget: twitch", "fidget_bubble": "Fidget: bubble"}
+
+
+def first_existing(paths, name=""):
+    for p in paths:
+        if os.path.exists(os.path.join(p, name)):
+            return p
+    return paths[-1]
+
+
+class Art:
+    """Reads lump.bin, the board's own drawings (format: firmware/src/main.cpp, parseAnim): for each mood the
+    frames of its loop, as the board's run-length data, which the page decodes and recolours exactly as the
+    firmware does. Only the header is parsed up front; frames are read when a mood is first asked for."""
+    LOOP = 0
+
+    def __init__(self, path):
+        import struct
+        with open(path, "rb") as f:
+            self.data = f.read()
+        d, p = self.data, 0
+        if d[:4] != b"LUMP" or struct.unpack_from("<H", d, 4)[0] != 3:
+            raise ValueError("not a lump.bin (version 3)")
+        p = 6
+        self.n_frames = struct.unpack_from("<H", d, p)[0]; p += 2
+        n_moods, self.fps = d[p], d[p + 1]; p += 2
+        names = []
+        for _ in range(n_moods):
+            p += 1                                       # base mood
+            n = d[p]; names.append(d[p + 1:p + 1 + n].decode("ascii", "replace")); p += 1 + n
+        n_seqs = d[p]; p += 1
+        self.loops = {}
+        for _ in range(n_seqs):
+            kind, frm = d[p], d[p + 1]; p += 3
+            n = d[p]; p += 1 + n
+            ln = struct.unpack_from("<H", d, p)[0]; p += 2
+            seq = list(struct.unpack_from("<%dH" % ln, d, p)); p += ln * 2
+            if kind == self.LOOP and frm < len(names):
+                self.loops[names[frm]] = seq
+        self.offsets = struct.unpack_from("<%dI" % self.n_frames, d, p)
+        self.base = p + self.n_frames * 4
+
+    def frame(self, i):
+        start = self.base + self.offsets[i]
+        end = self.base + self.offsets[i + 1] if i + 1 < self.n_frames else len(self.data)
+        return self.data[start:end]
+
+    def mood(self, name):
+        """{"fps", "ticks": indices into "frames", "frames": [base64 run-length data]} for one mood's loop."""
+        import base64
+        seq = self.loops.get(name) or self.loops.get("idle")
+        if not seq:
+            return None
+        order = list(dict.fromkeys(seq))
+        index = {f: n for n, f in enumerate(order)}
+        return {"fps": self.fps, "size": 240, "ticks": [index[f] for f in seq],
+                "frames": [base64.b64encode(self.frame(f)).decode("ascii") for f in order]}
+
+
+def system_theme():
+    """Windows' app theme: "light" or "dark" (dark if it can't be read)."""
+    try:
+        import winreg
+        with winreg.OpenKey(winreg.HKEY_CURRENT_USER, r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize") as k:
+            return "light" if winreg.QueryValueEx(k, "AppsUseLightTheme")[0] else "dark"
+    except Exception:
+        return "dark"
+
+
+def outcome(what, ok):
+    """The page's message for an action: done, or why not."""
+    if ok:
+        return {"ok": True, "message": f"{what}: done"}
+    return {"ok": False, "message": f"{what}: " + ("the board isn't connected" if ok is False else "the bridge isn't running")}
+
+
+class Api:
+    """Everything the page can ask for (pywebview's js_api: each public method is callable from the page and
+    returns plain JSON data). Settings go to the same files the bridge re-reads, as in the Tk window."""
+
+    def __init__(self, bridge, art_path=None, ctl=None):
+        self._bridge, self._ctl = bridge, ctl or bridge_ctl
+        self._art_path = art_path or next((p for p in ART_FILES if os.path.exists(p)), ART_FILES[-1])
+        self._art, self._mood_cache = None, {}
+
+    # --- what the page shows
+    def state(self):
+        cfg, snd = read_json(CONFIG_FILE), read_json(SOUNDS_FILE)
+        moments = {k: bool((v or {}).get("on")) for k, v in sorted((snd.get("moments") or {}).items())}
+        try: tap = float(cfg.get("tap_threshold") or 0.35)
+        except (TypeError, ValueError): tap = 0.35
+        return {"status": self._bridge.status(),
+                "theme": cfg.get("ui_theme") if cfg.get("ui_theme") in ("dark", "light") else system_theme(),
+                "colour": current_body_colour(), "tap": tap,
+                "sounds": {"enabled": bool(snd.get("enabled")), "volume": float(snd.get("volume", 1.0)),
+                           "quiet_at_night": bool(snd.get("quiet_at_night", True)), "moments": moments},
+                "settings": {"lump_host": cfg.get("lump_host", ""), "lump_paired": bool(cfg.get("lump_token")),
+                             "calendar_ics": cfg.get("calendar_ics", ""), "my_email": cfg.get("my_email", ""),
+                             "slack_token": cfg.get("slack_token", ""), "slack_vips": ", ".join(cfg.get("slack_vips") or []),
+                             "slack_vip_minutes": str(cfg.get("slack_vip_minutes") or "")}}
+
+    def animations(self):
+        names = self._bridge.animations() or []
+        return [{"name": n, "label": GAG_NAMES.get(n, n.replace("_", " ").capitalize())} for n in names]
+
+    def screen(self, mood):
+        """One mood's loop as the board draws it (see class Art), or None if the drawings can't be read."""
+        if mood not in self._mood_cache:
+            try:
+                if self._art is None:
+                    self._art = Art(self._art_path)
+                self._mood_cache[mood] = self._art.mood(str(mood))
+            except (OSError, ValueError, IndexError) as e:
+                return None
+        return self._mood_cache[mood]
+
+    # --- actions
+    def play(self, name):
+        return outcome(f"play {GAG_NAMES.get(name, name)}", self._bridge.play(name))
+
+    def preview(self, mood):
+        if mood != "demo" and mood not in MOODS:
+            return {"ok": False, "message": "no such mood"}
+        return outcome("showcase" if mood == "demo" else f"preview {mood}", self._bridge.cmd(f"s {mood}"))
+
+    def live(self):
+        return outcome("back to live", self._bridge.resync())
+
+    def set_tap(self, g):
+        t = round(min(1.5, max(0.1, float(g))), 2)
+        update_json(CONFIG_FILE, {"tap_threshold": None if abs(t - 0.35) < 0.005 else t})
+        return outcome(f"tap sensitivity {t:.2f} g", self._bridge.cmd(f"T {t:.2f}"))
+
+    def set_colour(self, hex_):
+        try:
+            set_body_colour(CONFIG_FILE, hex_)
+        except ValueError as e:
+            return {"ok": False, "message": str(e)}
+        r = self._bridge.resync()
+        return {"ok": True, "message": "colour saved" + ("" if r else " (Lump gets it when the bridge is running)")}
+
+    def set_sound(self, on):
+        if self._bridge.sound("on" if on else "off") is None:          # bridge down: write the file ourselves
+            update_json(SOUNDS_FILE, {"enabled": bool(on)})
+        return {"ok": True, "message": "sounds " + ("on" if on else "off")}
+
+    def set_volume(self, v):
+        update_json(SOUNDS_FILE, {"volume": round(min(2.0, max(0.1, float(v))), 2)})
+        return {"ok": True, "message": ""}
+
+    def set_quiet(self, on):
+        update_json(SOUNDS_FILE, {"quiet_at_night": bool(on)})
+        return {"ok": True, "message": ""}
+
+    def set_moment(self, name, on):
+        set_moment(SOUNDS_FILE, str(name), bool(on))
+        return {"ok": True, "message": ""}
+
+    def play_sound(self, name):
+        r = self._bridge.sound(f"play {name}")
+        return {"ok": r == "ok", "message": f"sound {name}" + (": the bridge isn't running" if r is None else "" if r == "ok" else ": not found")}
+
+    def save_settings(self, values):
+        v = {k: str((values or {}).get(k, "")).strip() for k in ("lump_host", "calendar_ics", "my_email", "slack_token", "slack_vips", "slack_vip_minutes")}
+        mins = v.pop("slack_vip_minutes")
+        try:
+            mins = float(mins) if mins else None
+        except ValueError:
+            return {"ok": False, "message": "Letter minutes must be a number"}
+        old = read_json(CONFIG_FILE)
+        update_json(CONFIG_FILE, {**v, "slack_vips": parse_vips(v.pop("slack_vips")) or None, "slack_vip_minutes": mins})
+        if v["calendar_ics"] != old.get("calendar_ics", "") or v["my_email"] != old.get("my_email", ""):
+            threading.Thread(target=self._bridge.calendar_now, daemon=True).start()
+        return {"ok": True, "message": "settings saved"}
+
+    def set_theme(self, theme):
+        update_json(CONFIG_FILE, {"ui_theme": theme if theme in ("dark", "light") else None})
+        return {"ok": True, "message": ""}
+
+    def bridge_ctl(self, action):
+        if action == "start":
+            self._ctl("Start")
+        elif action == "restart":
+            self._ctl("Stop"); self._ctl("Start")
+        else:
+            return {"ok": False, "message": "no such action"}
+        return {"ok": True, "message": "bridge " + ("started" if action == "start" else "restarted")}
+
+    def open(self, what):
+        path = {"log": os.path.join(HOME, "bridge.log"), "folder": HOME}.get(what)
+        if path and os.path.exists(path):
+            os.startfile(path)
+            return {"ok": True, "message": ""}
+        return {"ok": False, "message": "not found"}
+
+
 # ---------- the tray icon ----------
-def start_tray(root, win, bridge):
+def start_tray(bridge, show, restart, quit_app, holder):
+    """The tray icon. show/restart/quit_app: callbacks; holder["status"] is kept up to date for the menu."""
     try:
         import pystray
         from PIL import Image
@@ -476,13 +689,12 @@ def start_tray(root, win, bridge):
         return None
     path = os.path.join(HOME, "lump_icon.png")
     if not os.path.exists(path):
-        path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lumpbar", "icon.png")
+        path = os.path.join(os.path.dirname(HERE), "lumpbar", "icon.png")
     image = Image.open(path) if os.path.exists(path) else Image.new("RGBA", (64, 64), (255, 122, 69, 255))
-    ui = lambda fn, *a: root.after(0, fn, *a)
     names = bridge.animations() or ["tap", "disco", "shock", "hello"]
 
     def sound_on(item=None):
-        return bool((win.status or {}).get("sound"))
+        return bool((holder.get("status") or {}).get("sound"))
 
     def toggle_sound(icon, item):
         bridge.sound("toggle") if bridge.status() else update_json(SOUNDS_FILE, {"enabled": not read_json(SOUNDS_FILE).get("enabled")})
@@ -491,12 +703,12 @@ def start_tray(root, win, bridge):
         return lambda icon, item: bridge.play(n)
 
     menu = pystray.Menu(
-        pystray.MenuItem("Open Lump Control", lambda icon, item: ui(win.show), default=True),
-        pystray.MenuItem("Play", pystray.Menu(*[pystray.MenuItem(n.replace("_", " "), player(n)) for n in names])),
+        pystray.MenuItem("Open Lump Control", lambda icon, item: show(), default=True),
+        pystray.MenuItem("Play", pystray.Menu(*[pystray.MenuItem(GAG_NAMES.get(n, n.replace("_", " ")), player(n)) for n in names])),
         pystray.MenuItem("Sound", toggle_sound, checked=sound_on),
         pystray.Menu.SEPARATOR,
-        pystray.MenuItem("Restart bridge", lambda icon, item: ui(win.restart)),
-        pystray.MenuItem("Quit Lump Control", lambda icon, item: (icon.stop(), ui(root.destroy))),
+        pystray.MenuItem("Restart bridge", lambda icon, item: restart()),
+        pystray.MenuItem("Quit Lump Control", lambda icon, item: (icon.stop(), quit_app())),
     )
     icon = pystray.Icon("lump-control", image, "Lump", menu)
     icon.run_detached()
@@ -504,7 +716,7 @@ def start_tray(root, win, bridge):
     def keep_title():
         while True:
             st = bridge.status()
-            win.status = st if st is not None else None
+            holder["status"] = st
             try:
                 icon.title = ("Lump: " + describe(st))[:120]
                 icon.update_menu()
@@ -515,22 +727,95 @@ def start_tray(root, win, bridge):
     return icon
 
 
+def set_window_icon(title):
+    """Give the window Lump's icon instead of Python's (pywebview can't set one on Windows)."""
+    try:
+        import ctypes
+        ico = os.path.join(HOME, "lump.ico")
+        if not os.path.exists(ico):
+            from PIL import Image
+            src = os.path.join(HOME, "lump_icon.png")
+            if not os.path.exists(src):
+                src = os.path.join(os.path.dirname(HERE), "lumpbar", "icon.png")
+            Image.open(src).save(ico, sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (256, 256)])
+        user32 = ctypes.windll.user32
+        user32.LoadImageW.restype = ctypes.c_void_p
+        user32.SendMessageW.argtypes = (ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_void_p)
+        hwnd = user32.FindWindowW(None, title)
+        small, big = user32.GetSystemMetrics(49), user32.GetSystemMetrics(11)   # SM_CXSMICON, SM_CXICON (DPI-aware)
+        for which, size in ((0, small or 16), (1, big or 32)):  # ICON_SMALL (title bar), ICON_BIG (taskbar, Alt+Tab)
+            icon = user32.LoadImageW(None, ico, 1, size, size, 0x10)   # IMAGE_ICON, LR_LOADFROMFILE
+            if hwnd and icon:
+                user32.SendMessageW(hwnd, 0x80, which, icon)           # WM_SETICON
+    except Exception:
+        pass
+
+
+def run_webview(bridge, start_hidden):
+    """The new window. Returns False if pywebview isn't available (the caller falls back to Tk)."""
+    try:
+        import webview
+    except ImportError:
+        return False
+    ui_dir = first_existing(UI_DIRS, "index.html")
+    api = Api(bridge)
+    quitting = {"now": False}
+    win = webview.create_window("Lump Control", url=os.path.join(ui_dir, "index.html"), js_api=api, width=1040, height=700,
+                                min_size=(900, 620), hidden=start_hidden, background_color="#141518")
+
+    def on_closing():
+        if quitting["now"]:
+            return True
+        win.hide()                        # closing the window keeps Lump Control in the tray
+        return False
+    win.events.closing += on_closing
+    win.events.shown += lambda: set_window_icon("Lump Control")
+
+    def show():
+        win.show(); win.restore()
+
+    def restart():
+        threading.Thread(target=lambda: (bridge_ctl("Stop"), bridge_ctl("Start")), daemon=True).start()
+
+    def quit_app():
+        quitting["now"] = True
+        win.destroy()
+
+    holder = {}
+    listen_for_show(show)
+    tray = start_tray(bridge, show, restart, quit_app, holder)
+    if tray is None and start_hidden:
+        win.events.loaded += lambda: win.show()      # no tray to open it from: show it
+    webview.start(private_mode=False, storage_path=os.path.join(HOME, "webview"))
+    if tray:
+        tray.stop()
+    return True
+
+
 def main():
     if already_running():
         return
     try:
         import ctypes
         ctypes.windll.shcore.SetProcessDpiAwareness(1)          # crisp text on high-DPI screens
+        # its own taskbar identity, so the taskbar shows Lump's icon instead of grouping it under Python
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("DeskBuddy.LumpControl")
     except Exception:
         pass
+    bridge = Bridge()
+    start_hidden = "--show" not in sys.argv                     # at logon: just the tray icon
+    if "--tk" not in sys.argv and run_webview(bridge, start_hidden):
+        return
     import tkinter as tk
     root = tk.Tk()
-    bridge = Bridge()
     win = ControlWindow(root, bridge)
     listen_for_show(lambda: root.after(0, win.show))
-    tray = start_tray(root, win, bridge)
-    if tray and "--show" not in sys.argv:
-        root.withdraw()                                         # at logon: just the tray icon
+    holder = {}
+    tray = start_tray(bridge, lambda: root.after(0, win.show), lambda: root.after(0, win.restart),
+                      lambda: root.after(0, root.destroy), holder)
+    win.status_holder = holder
+    if tray and start_hidden:
+        root.withdraw()
     root.after(REFRESH_MS, win.tick)
     root.mainloop()
     if tray:
