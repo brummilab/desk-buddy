@@ -107,6 +107,25 @@ def set_moment(path, moment, on):
     return update_json(path, {"moments": moments})
 
 
+# Swatches for his body colour (name, RRGGBB); "Pick…" offers any colour. Tangerine is his own default.
+DEFAULT_BODY_COLOUR = "FF7A45"
+BODY_COLOURS = (("Tangerine", "FF7A45"), ("Lemon", "FFC93C"), ("Mint", "3DD68C"), ("Sky", "4FA8FF"),
+                ("Grape", "9B6BFF"), ("Bubblegum", "FF6FB5"), ("Cherry", "E8334A"))
+
+
+def current_body_colour(path=None):
+    c = str(read_json(path or CONFIG_FILE).get("body_colour") or "").strip().lstrip("#").upper()
+    return c if len(c) == 6 and all(ch in "0123456789ABCDEF" for ch in c) else DEFAULT_BODY_COLOUR
+
+
+def set_body_colour(path, hex_):
+    """Save his everyday colour to config.json (None or Tangerine removes the setting: back to his default)."""
+    h = (hex_ or "").strip().lstrip("#").upper()
+    if h and not (len(h) == 6 and all(ch in "0123456789ABCDEF" for ch in h)):
+        raise ValueError("colour must be RRGGBB")
+    return update_json(path, {"body_colour": None if h in ("", DEFAULT_BODY_COLOUR) else h})
+
+
 def parse_vips(text):
     return [n.strip() for n in text.replace("\n", ",").split(",") if n.strip()]
 
@@ -300,6 +319,34 @@ class ControlWindow:
         self.tap_label.config(text=f"{self.tap_var.get():.2f} g")
         ttk.Button(tap, text="Apply", command=self.apply_tap).pack(side="left")
         ttk.Button(tap, text="Default", command=lambda: (self.tap_var.set(0.35), self.tap_label.config(text="0.35 g"), self.apply_tap())).pack(side="left", padx=6)
+        self.build_colour(f)
+
+    def build_colour(self, f):
+        """His everyday body colour. The board recolours his drawings live; the usage gauge and meeting countdown
+        still blend from it, and the usage warning still ends in the same reds."""
+        ttk, tk = self.ttk, self.tk
+        ttk.Label(f, text="Body colour (usage warnings and meetings still blend from it)", padding=(0, 14, 0, 0)).pack(anchor="w")
+        row = ttk.Frame(f, padding=(0, 6)); row.pack(fill="x")
+        self.colour_swatch = tk.Canvas(row, width=28, height=28, highlightthickness=0)
+        self.colour_swatch.pack(side="left", padx=(0, 10))
+        self.colour_dot = self.colour_swatch.create_oval(2, 2, 26, 26, fill="#" + current_body_colour(), outline="")
+        for name, hex_ in BODY_COLOURS:
+            b = tk.Button(row, width=2, bg="#" + hex_, activebackground="#" + hex_, relief="flat", cursor="hand2",
+                          command=lambda h=hex_, n=name: self.set_colour(h, n))
+            b.pack(side="left", padx=2)
+        ttk.Button(row, text="Pick…", command=self.pick_colour).pack(side="left", padx=(10, 0))
+        ttk.Button(row, text="Tangerine", command=lambda: self.set_colour(None, "Tangerine")).pack(side="left", padx=6)
+
+    def pick_colour(self):
+        from tkinter import colorchooser
+        rgb, hex_ = colorchooser.askcolor(color="#" + current_body_colour(), title="Lump's colour", parent=self.root)
+        if hex_:
+            self.set_colour(hex_.lstrip("#").upper(), "#" + hex_.lstrip("#").upper())
+
+    def set_colour(self, hex_, name):
+        set_body_colour(CONFIG_FILE, hex_)
+        self.colour_swatch.itemconfig(self.colour_dot, fill="#" + current_body_colour())
+        self.run(f"colour {name}", self.bridge.resync)          # the bridge re-reads it and sends the new colour
 
     def fill_animations(self):
         def work():

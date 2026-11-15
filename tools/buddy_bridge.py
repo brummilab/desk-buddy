@@ -735,12 +735,21 @@ def meeting_blend(base, t):
     return oklch_to_hex(L1 + (L2 - L1) * t, max(0.13, C1 + (C2 - C1) * t), (H1 + dh * t + 360) % 360)
 
 
-def usage_colour(frac):
+def body_colour():
+    """His everyday colour: config.json "body_colour" (RRGGBB, set from Lump Control), else Tangerine."""
+    c = str(read_config().get("body_colour") or "").strip().lstrip("#").upper()
+    return c if re.fullmatch(r"[0-9A-F]{6}", c) else DEFAULT_COLOUR
+
+
+def usage_colour(frac, base=DEFAULT_COLOUR):
+    """The usage gauge: his own colour until half the limit, then warming to the same reds whatever that colour
+    is (so the warning keeps its meaning), grey at the limit."""
     frac = max(0.0, min(1.0, frac))
-    for (f0, c0), (f1, c1) in zip(USAGE_STOPS, USAGE_STOPS[1:]):
+    stops = [(f, base if c == DEFAULT_COLOUR else c) for f, c in USAGE_STOPS]
+    for (f0, c0), (f1, c1) in zip(stops, stops[1:]):
         if frac <= f1:
             return _mix(c0, c1, 0 if f1 == f0 else (frac - f0) / (f1 - f0))
-    return USAGE_STOPS[-1][1]
+    return stops[-1][1]
 
 
 class StallWatch:
@@ -1185,11 +1194,12 @@ class Buddy:
         return max(fr) if fr else None
 
     def colour(self, now):
-        """Meeting countdown beats the usage gauge, which beats plain Tangerine."""
-        base = DEFAULT_COLOUR
+        """Meeting countdown beats the usage gauge, which beats his everyday colour (Tangerine unless you
+        picked another in Lump Control)."""
+        base = body_colour()
         frac = self.usage_frac(now)
         if frac is not None:
-            base = usage_colour(round(frac * 50) / 50)      # 2% steps: no flicker
+            base = usage_colour(round(frac * 50) / 50, base)      # 2% steps: no flicker
         m = self.next_meeting(now)
         if m:
             until = m["start"] - now
