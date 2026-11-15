@@ -20,8 +20,10 @@ class Apps(unittest.TestCase):
     def setUp(self):
         self.root = tempfile.mkdtemp(prefix="deskbuddy-apps-")
         self.support = os.path.join(self.root, "AppData")
-        os.makedirs(os.path.join(self.support, "Claude"))
-        os.makedirs(os.path.join(self.support, "Claude-Work"))
+        for app in ("Claude", "Claude-Work"):
+            os.makedirs(os.path.join(self.support, app))
+            open(os.path.join(self.support, app, "Local State"), "w").close()
+        os.makedirs(os.path.join(self.support, "Claude-NativeHost"))      # the browser extension's helper: not an app
         self.rentals = os.path.join(self.root, ".claude-instances", "rentals")
         os.makedirs(self.rentals)
         self.cfg = os.path.join(self.root, "config.json")

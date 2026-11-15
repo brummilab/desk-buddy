@@ -434,7 +434,10 @@ class ClaudeApps:
         return self.support or APP_SUPPORT
 
     def usual(self):
-        return sorted(d for d in glob.glob(os.path.join(glob.escape(self._support()), "Claude*")) if os.path.isdir(d))
+        """The usual data folders: Claude, Claude-Work, ... that hold an app's data ("Local State", or its usage
+        history), so helper folders such as the browser extension's Claude-NativeHost aren't taken for apps."""
+        return sorted(d for d in glob.glob(os.path.join(glob.escape(self._support()), "Claude*"))
+                      if os.path.isfile(os.path.join(d, "Local State")) or os.path.isfile(os.path.join(d, "plan-usage-history.json")))
 
     def configured(self):
         out = []

@@ -200,12 +200,14 @@ function renderUsage(st) {
   let shown = apps.filter((a) => pct(a.account, "five_hour") != null || pct(a.account, "seven_day") != null);
   if (!shown.length) shown = apps.slice(0, 1);
   const named = shown.length > 1;
-  const bar = (label, p) => [
+  const bar = (label, p) => el("div", { class: "usage-cell" },
     el("div", { class: "usage-row" }, el("span", {}, label), el("span", {}, p == null ? "–" : Math.round(p) + "%")),
-    el("div", { class: "bar" }, el("div", { class: "fill", style: `width:${p == null ? 0 : Math.min(100, p)}%` }))];
+    el("div", { class: "bar" }, el("div", { class: "fill", style: `width:${p == null ? 0 : Math.min(100, p)}%` })));
+  // one app: two full-width bars; several: a compact pair per app, side by side
+  $("usage").classList.toggle("multi", named);
   $("usage").replaceChildren(...shown.flatMap((a) => [
     ...(named ? [el("div", { class: "usage-app" }, a.name)] : []),
-    ...bar("5-hour usage", pct(a.account, "five_hour")), ...bar("Weekly usage", pct(a.account, "seven_day"))]));
+    bar(named ? "5-hour" : "5-hour usage", pct(a.account, "five_hour")), bar(named ? "Week" : "Weekly usage", pct(a.account, "seven_day"))]));
 }
 
 // Claude apps card: names are editable; usual and running ones stay listed, added folders can be removed
