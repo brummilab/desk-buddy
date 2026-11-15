@@ -87,10 +87,10 @@ class SettingsFiles(unittest.TestCase):
     def test_update_keeps_other_keys_and_removes_blanks(self):
         with open(self.path, "w", encoding="utf-8") as f:
             json.dump({"lump_token": "abc", "slack_token": "xoxp-1", "note": "Lump’s"}, f, ensure_ascii=False)
-        control.update_json(self.path, {"lump_host": "jake-work", "slack_token": "", "slack_vips": None})
+        control.update_json(self.path, {"lump_host": "lumps-pc", "slack_token": "", "slack_vips": None})
         with open(self.path, encoding="utf-8") as f:
             text = f.read()
-        self.assertEqual(json.loads(text), {"lump_token": "abc", "note": "Lump’s", "lump_host": "jake-work"})
+        self.assertEqual(json.loads(text), {"lump_token": "abc", "note": "Lump’s", "lump_host": "lumps-pc"})
         self.assertIn("Lump’s", text)                          # written as is, not \u-escaped
 
     def test_missing_or_broken_file_reads_empty(self):
