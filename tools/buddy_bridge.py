@@ -388,6 +388,14 @@ def is_claude_app(exe):
     return e.rsplit("\\", 1)[-1] == "claude.exe" and "\\claude-code\\" not in e
 
 
+def data_dir_of_args(args):
+    """The --user-data-dir a copy of the Claude app was started with, or None (the default folder)."""
+    for a in args or []:
+        if a.startswith("--user-data-dir="):
+            return a.split("=", 1)[1].strip('"')
+    return None
+
+
 def account_of_pid_win(pid):
     """Windows: which account a running copy of the Claude app belongs to (from its --user-data-dir)."""
     try:
@@ -395,10 +403,106 @@ def account_of_pid_win(pid):
         args = psutil.Process(pid).cmdline()
     except Exception:
         return None
-    for a in args:
-        if a.startswith("--user-data-dir="):
-            return account_of_data_dir(a.split("=", 1)[1].strip('"'))
-    return PERSONAL
+    d = data_dir_of_args(args)
+    if not d:
+        return PERSONAL
+    APPS.note_running(d)
+    return APPS.account_for_dir(d)
+
+
+def app_slug(name):
+    """An account key from an app's name ("Work laptop" -> "work-laptop")."""
+    return re.sub(r"[^a-z0-9]+", "-", str(name).lower()).strip("-")[:24] or "app"
+
+
+class ClaudeApps:
+    """The Claude desktop apps on this computer, each its own account (own usage limits, own Code sessions).
+    The usual ones are the data folders Claude Switcher makes (Claude, Claude-Work, ... in APP_SUPPORT). On top:
+    config.json "claude_apps" ([{"name", "path"}], from Lump Control's Settings) for a copy kept somewhere else,
+    and on Windows any running copy started with its own --user-data-dir (found from the process list), so a
+    second app shows up without setting anything. A folder's account: "personal" for the usual Claude folder,
+    "work" for Claude-Work, else from the name it's given (or its folder name)."""
+
+    def __init__(self, support=None):
+        self.support, self.running = support, {}          # normalised folder -> folder, of running copies seen
+
+    @staticmethod
+    def _norm(path):
+        return os.path.normcase(os.path.abspath(os.path.expanduser(str(path)))).rstrip("\\/")
+
+    def _support(self):
+        return self.support or APP_SUPPORT
+
+    def usual(self):
+        return sorted(d for d in glob.glob(os.path.join(glob.escape(self._support()), "Claude*")) if os.path.isdir(d))
+
+    def configured(self):
+        out = []
+        for e in read_config().get("claude_apps") or []:
+            if isinstance(e, dict) and str(e.get("path") or "").strip():
+                out.append((str(e.get("name") or "").strip()[:40], str(e["path"]).strip()))
+        return out
+
+    def note_running(self, path):
+        self.running[self._norm(path)] = path
+
+    def detect(self):
+        """Windows: remember the data folders of the copies of the Claude app running now."""
+        if not IS_WIN:
+            return
+        try:
+            import psutil
+        except ImportError:
+            return
+        found = {}
+        for proc in psutil.process_iter(["name", "exe", "cmdline"]):
+            try:
+                if not is_claude_app(proc.info.get("exe") or proc.info.get("name") or ""):
+                    continue
+                d = data_dir_of_args(proc.info.get("cmdline"))
+                if d:
+                    found[self._norm(d)] = d
+            except Exception:
+                continue
+        self.running = found
+
+    def list(self):
+        """[{"account", "name", "path", "source": "usual" | "configured" | "running"}], the usual apps first."""
+        names = {self._norm(p): n for n, p in self.configured()}
+        apps, seen, used = [], set(), set()
+        for d in self.usual():
+            acct = account_of_data_dir(d)
+            apps.append({"account": acct, "name": names.get(self._norm(d)) or ("Main" if acct == PERSONAL else acct.capitalize()),
+                         "path": d, "source": "usual"})
+            seen.add(self._norm(d)); used.add(acct)
+        extra = [(n, p, "configured") for n, p in self.configured()]
+        extra += [("", p, "running") for p in self.running.values()]
+        for name, path, source in extra:
+            key = self._norm(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            name = name or os.path.basename(path.rstrip("\\/")).capitalize() or "Claude"
+            acct = app_slug(name)
+            while acct in used or acct == PERSONAL:
+                acct += "-2"
+            used.add(acct)
+            apps.append({"account": acct, "name": name, "path": path, "source": source})
+        return apps
+
+    def extra_dirs(self):
+        """(account, folder) for apps outside the usual folders."""
+        return [(a["account"], a["path"]) for a in self.list() if a["source"] != "usual"]
+
+    def account_for_dir(self, path):
+        key = self._norm(path)
+        for a in self.list():
+            if self._norm(a["path"]) == key:
+                return a["account"]
+        return account_of_data_dir(path)
+
+
+APPS = ClaudeApps()
 
 
 class Focus:
@@ -434,10 +538,15 @@ class Focus:
         """(account, cliSessionId) for a desktop Code session; misses aren't cached (the file may come later)."""
         if local not in self._map:
             files = glob.glob(os.path.join(glob.escape(self.SUPPORT), "Claude*", "claude-code-sessions", "*", "*", local + ".json"))
+            acct = None
+            for a, d in APPS.extra_dirs() if not files else ():      # an app kept elsewhere (ClaudeApps)
+                files = glob.glob(os.path.join(glob.escape(d), "claude-code-sessions", "*", "*", local + ".json"))
+                if files:
+                    acct = a; break
             if not files:
                 return None, None
             path = files[0]
-            acct = account_of_data_dir(path[:path.index(os.sep + "claude-code-sessions" + os.sep)])
+            acct = acct or account_of_data_dir(path[:path.index(os.sep + "claude-code-sessions" + os.sep)])
             try:
                 with open(path, encoding="utf-8") as f: self._map[local] = (acct, json.load(f).get("cliSessionId"))
             except Exception: return acct, None
@@ -1341,7 +1450,7 @@ class Buddy:
             ev = self.last_event_anim
             playing = {"name": ev["name"], "age": round(now - ev["at"], 2)} if ev and 0 <= now - ev["at"] < 30 else None
             return {"mood": mood, "shown": self.preview or mood, "playing": playing, "sent": self.sent_mood, "counts": self.counts_locked(now), "device": self.dev.connected, "link": getattr(self.dev, "link", None),
-                    "colour": self.colour(now), "usage": self.usage,
+                    "colour": self.colour(now), "usage": self.usage, "apps": APPS.list(),
                     "sound": bool(self.sounds.settings().get("enabled")),
                     "next_meeting": self.next_meeting(now),
                     "focus": {"claude_in_front": self.focus.front, "account": getattr(self.focus, "account", None), "code_session": (self.focus.code_session or "")[:8],
@@ -1666,6 +1775,7 @@ class AppUsageFile:
     """Windows: usage from the Claude desktop app's own history file (plan-usage-history.json in each copy's
     data folder: {"samples": [{"t": ms, "org": ..., "u": {"fh": 5-hour %, "sd": weekly %}}]}), written about
     every 15 minutes. The desktop app has no status line, so this is how his colour follows your limits there.
+    Every Claude app on the computer is read, each as its own account (class ClaudeApps).
     Only a sample newer than the last one taken is fed, stamped with its own time, so a fresher status-line
     reading (from a CLI session) is never overwritten by it."""
 
@@ -1685,8 +1795,14 @@ class AppUsageFile:
             time.sleep(self.EVERY)
 
     def poll(self, now):
-        for path in glob.glob(os.path.join(glob.escape(self.support), "Claude*", self.NAME)):
-            acct = account_of_data_dir(os.path.dirname(path))
+        APPS.detect()
+        apps = ClaudeApps(self.support) if self.support else APPS
+        if apps is not APPS:
+            apps.running = APPS.running
+        for app in apps.list():
+            path, acct = os.path.join(app["path"], self.NAME), app["account"]
+            if not os.path.exists(path):
+                continue
             try:
                 with open(path, encoding="utf-8") as f:
                     samples = json.load(f).get("samples") or []

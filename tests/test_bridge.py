@@ -5,8 +5,21 @@ Run with the bridge's own Python (it has pyserial):
 Nothing here touches the real board, speakers or ~/.desk-buddy: the bridge is pointed at a temp
 folder and given fake device / focus / sound objects.
 """
-import importlib.util, json, os, sys, tempfile, time, unittest
+import atexit, importlib.util, json, logging, os, shutil, sys, tempfile, time, unittest
 from unittest import mock
+
+# Every test's temp folders go under one folder for the run, removed when the run ends (the bridge's log is
+# closed first: Windows won't delete an open file).
+_RUN_TMP = tempfile.mkdtemp(prefix="deskbuddy-tests-")
+tempfile.tempdir = _RUN_TMP
+
+
+def _clean_up():
+    for h in list(logging.getLogger("bridge").handlers):
+        h.close()
+    tempfile.tempdir = None
+    shutil.rmtree(_RUN_TMP, ignore_errors=True)
+atexit.register(_clean_up)
 
 HOME = tempfile.mkdtemp(prefix="deskbuddy-test-")
 os.environ["DESKBUDDY_HOME"] = HOME

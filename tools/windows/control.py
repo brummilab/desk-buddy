@@ -678,6 +678,34 @@ class Api:
             threading.Thread(target=self._bridge.calendar_now, daemon=True).start()
         return {"ok": True, "message": "settings saved"}
 
+    def save_apps(self, apps):
+        """Remember the Claude apps to read usage from (config.json "claude_apps": [{"name", "path"}]). The usual
+        app folders are always read; listing one here only names it. The bridge picks changes up within a minute."""
+        out, seen = [], set()
+        for a in (apps or [])[:12]:
+            name, path = str((a or {}).get("name", "")).strip()[:40], str((a or {}).get("path", "")).strip()
+            if not path:
+                continue
+            if not os.path.isdir(path):
+                return {"ok": False, "message": f"not a folder: {path}"}
+            key = os.path.normcase(os.path.abspath(path))
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append({"name": name or os.path.basename(path.rstrip("\\/")).capitalize(), "path": path})
+        update_json(CONFIG_FILE, {"claude_apps": out or None})
+        return {"ok": True, "message": "Claude apps saved (usage shows within a minute)"}
+
+    def pick_folder(self):
+        """A folder dialog for the data folder of a Claude app kept somewhere unusual; None if cancelled."""
+        win = getattr(self, "_window", None)
+        if win is None:
+            return None
+        import webview
+        start = os.path.expanduser("~")
+        got = win.create_file_dialog(webview.FOLDER_DIALOG, directory=start)
+        return got[0] if got else None
+
     def set_theme(self, theme):
         update_json(CONFIG_FILE, {"ui_theme": theme if theme in ("dark", "light") else None})
         return {"ok": True, "message": ""}
@@ -780,7 +808,7 @@ def run_webview(bridge, start_hidden):
     ui_dir = first_existing(UI_DIRS, "index.html")
     api = Api(bridge)
     quitting = {"now": False}
-    win = webview.create_window("Lump Control", url=os.path.join(ui_dir, "index.html"), js_api=api, width=1040, height=700,
+    win = api._window = webview.create_window("Lump Control", url=os.path.join(ui_dir, "index.html"), js_api=api, width=1040, height=700,
                                 min_size=(900, 620), hidden=start_hidden, background_color="#141518")
 
     def on_closing():

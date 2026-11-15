@@ -159,13 +159,8 @@ function render(s) {
 
   const c = (up && st.counts) || {};
   $("n-working").textContent = c.working || 0; $("n-alert").textContent = c.alert || 0; $("n-unseen").textContent = c.unseen || 0;
-  const usage = (up && st.usage) || {};
-  for (const [key, id] of [["five_hour", "u5"], ["seven_day", "u7"]]) {
-    const vals = Object.entries(usage).filter(([k]) => k === key || k.endsWith(":" + key)).map(([, v]) => v.pct).filter((v) => v != null);
-    const pct = vals.length ? Math.max(...vals) : null;
-    $(id).textContent = pct == null ? "–" : Math.round(pct) + "%";
-    $(id + "-bar").style.width = (pct == null ? 0 : Math.min(100, pct)) + "%";
-  }
+  renderUsage(up ? st : null);
+  renderApps(up ? st.apps : null);
 
   // status page
   const sess = Object.entries((up && st.sessions) || {}).sort((a, b) => a[1].age_s - b[1].age_s);
@@ -196,6 +191,43 @@ function render(s) {
     for (const [k, v] of Object.entries(s.settings)) if (f.elements[k]) f.elements[k].value = v;
     formFilled = true;
   }
+}
+
+// usage: a 5-hour and a weekly bar for each Claude app with readings (each app is its own account)
+function renderUsage(st) {
+  const usage = (st && st.usage) || {}, apps = (st && st.apps) || [{ account: "personal", name: "Claude" }];
+  const pct = (acct, w) => { const v = usage[acct === "personal" ? w : `${acct}:${w}`]; return v && v.pct != null ? v.pct : null; };
+  let shown = apps.filter((a) => pct(a.account, "five_hour") != null || pct(a.account, "seven_day") != null);
+  if (!shown.length) shown = apps.slice(0, 1);
+  const named = shown.length > 1;
+  const bar = (label, p) => [
+    el("div", { class: "usage-row" }, el("span", {}, label), el("span", {}, p == null ? "–" : Math.round(p) + "%")),
+    el("div", { class: "bar" }, el("div", { class: "fill", style: `width:${p == null ? 0 : Math.min(100, p)}%` }))];
+  $("usage").replaceChildren(...shown.flatMap((a) => [
+    ...(named ? [el("div", { class: "usage-app" }, a.name)] : []),
+    ...bar("5-hour usage", pct(a.account, "five_hour")), ...bar("Weekly usage", pct(a.account, "seven_day"))]));
+}
+
+// Claude apps card: names are editable; usual and running ones stay listed, added folders can be removed
+let appsKey = "", appsDraft = null;
+function renderApps(apps) {
+  if (appsDraft) return;                                                 // being edited: leave it alone
+  const key = JSON.stringify(apps || []);
+  if (key === appsKey) return;
+  appsKey = key;
+  drawApps((apps || []).map((a) => ({ ...a })));
+}
+function drawApps(list) {
+  const badge = { usual: "usual folder", configured: "added", running: "found running" };
+  $("apps").replaceChildren(...list.map((a, i) => el("div", { class: "app-row" },
+    el("input", { type: "text", value: a.name, "aria-label": "Name for " + a.path,
+      oninput: (e) => { appsDraft = appsDraft || list; list[i].name = e.target.value; } }),
+    el("span", { class: "path", title: a.path }, a.path),
+    el("span", { class: "badge" }, badge[a.source] || a.source),
+    a.source === "configured"
+      ? el("button", { class: "btn", type: "button", onclick: () => { appsDraft = list; list.splice(i, 1); drawApps(list); } }, "Remove")
+      : el("span", {}))));
+  $("apps").dataset.list = JSON.stringify(list);
 }
 
 let momentsKey = "";
@@ -261,6 +293,22 @@ function wire() {
   $("colour-pick").addEventListener("change", (e) => act(api().set_colour(e.target.value.replace("#", "").toUpperCase())));
   $("colour-reset").addEventListener("click", () => act(api().set_colour(null)));
 
+  $("apps-add").addEventListener("click", async () => {
+    const path = await api().pick_folder();
+    if (!path) return;
+    const list = JSON.parse($("apps").dataset.list || "[]");
+    if (!list.some((a) => a.path.toLowerCase() === path.toLowerCase())) {
+      list.push({ name: path.split(/[\\/]/).filter(Boolean).pop() || "Claude", path, source: "configured", account: "" });
+    }
+    appsDraft = list; drawApps(list);
+  });
+  $("apps-save").addEventListener("click", async () => {
+    const list = JSON.parse($("apps").dataset.list || "[]");
+    const keep = list.filter((a) => a.source !== "usual" || !/^(main|work)$/i.test(a.name)).map((a) => ({ name: a.name, path: a.path }));
+    const res = await api().save_apps(keep);
+    toast(res);
+    if (res.ok) { appsDraft = null; appsKey = ""; }
+  });
   $("settings-form").addEventListener("submit", async (e) => {
     e.preventDefault();
     const f = e.target, values = {};

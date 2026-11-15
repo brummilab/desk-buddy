@@ -26,12 +26,7 @@
       <div class="stat"><span class="num" id="n-alert">0</span><span class="lbl">need you</span></div>
       <div class="stat"><span class="num" id="n-unseen">0</span><span class="lbl">unseen</span></div>
     </div>
-    <div class="usage">
-      <div class="usage-row"><span>5-hour usage</span><span id="u5">–</span></div>
-      <div class="bar"><div class="fill" id="u5-bar"></div></div>
-      <div class="usage-row"><span>Weekly usage</span><span id="u7">–</span></div>
-      <div class="bar"><div class="fill" id="u7-bar"></div></div>
-    </div>
+    <div class="usage" id="usage" aria-label="Claude usage"></div>
   </aside>
 
   <main class="content">
@@ -102,6 +97,15 @@
           <button class="btn" type="button" id="colour-reset">Tangerine</button>
         </div>
         <p class="note">Usage warnings and meeting countdowns still blend from it.</p>
+      </div>
+      <div class="card">
+        <h2 class="card-title">Claude apps</h2>
+        <p class="note">Every Claude desktop app here has its own usage limits. Lump turns red for whichever is closest. A copy started with its own data folder shows up here by itself while it runs; name it and save to keep it.</p>
+        <div class="apps" id="apps"></div>
+        <div class="row-actions tight">
+          <button class="btn" type="button" id="apps-add">Add a data folder…</button>
+          <button class="btn primary" type="button" id="apps-save">Save</button>
+        </div>
       </div>
       <form class="card form" id="settings-form">
         <h2 class="card-title">Lump's connection</h2>
