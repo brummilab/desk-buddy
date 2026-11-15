@@ -119,6 +119,31 @@ class ApiTest(unittest.TestCase):
             sf.assert_not_called()
 
 
+class AnimationsAreMirrored(unittest.TestCase):
+    """The board announces each one-off animation ("event <name>"); /status reports it as "playing" for a while."""
+    def test_event_lines_become_playing(self):
+        from test_bridge import bridge, FakeDevice, FakeFocus, FakeSounds, NOON
+        t = [NOON]
+        with mock.patch.object(bridge.time, "time", side_effect=lambda: t[0]):
+            b = bridge.Buddy(dev=FakeDevice(), focus=FakeFocus(), sounds=FakeSounds(), start=False)
+            self.assertIsNone(b.status()["playing"])
+            b.board_line("event tap_disco_working")
+            t[0] += 1.5
+            self.assertEqual(b.status()["playing"], {"name": "tap_disco_working", "age": 1.5})
+            b.board_line("event ../../etc")                  # not a name: ignored
+            self.assertEqual(b.status()["playing"]["name"], "tap_disco_working")
+            t[0] += 60
+            self.assertIsNone(b.status()["playing"])        # long over
+
+    @unittest.skipUnless(os.path.exists(ART), "needs firmware/data/lump.bin")
+    def test_the_window_gets_the_same_frames(self):
+        api = control.Api(FakeBridge(), art_path=ART)
+        e = api.screen_event("fidget_toss")
+        self.assertEqual(len(e["ticks"]), 50)
+        self.assertTrue(api.screen_event("tap_disco_working"))
+        self.assertIsNone(api.screen_event("no_such_thing"))
+
+
 class PreviewIsWhatHeShows(unittest.TestCase):
     """A mood previewed from the Play tab goes straight to the board; /status reports it as "shown" until the
     bridge next sends his real mood."""

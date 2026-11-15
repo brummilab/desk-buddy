@@ -85,8 +85,36 @@ async function showLump(mood, colour) {
   if (lump.loading !== key) return;
   Object.assign(lump, { key, frames, ticks: s.ticks, fps: s.fps, loading: "" });
 }
+// one-off animations (gags, taps, fidgets, oops, hello): the board names each as it starts ("playing" in the
+// status); the window plays the same sequence once, from where the board is in it, then goes back to the loop
+const anim = { key: "", frames: [], ticks: [], fps: 24, start: 0, loading: "" };
+const events = new Map();                                                // name -> the board's data for it
+async function playEvent(name, age, colour) {
+  const key = `${name}|${Math.round(Date.now() / 1000 - age)}|${colour}`;
+  if (key === anim.key || key === anim.loading) return;
+  anim.loading = key;
+  if (!events.has(name)) events.set(name, await api().screen_event(name));
+  const e = events.get(name);
+  if (!e || anim.loading !== key) { if (anim.loading === key) anim.loading = ""; return; }
+  if (age > e.ticks.length / e.fps) { anim.loading = ""; return; }      // already over on the board
+  const tint = rgb(colour), cache = new Map();
+  Object.assign(anim, { key, frames: e.frames.map((f) => decodeFrame(f, tint, cache)), ticks: e.ticks, fps: e.fps,
+                        start: performance.now() - age * 1000, loading: "" });
+}
+function animLabel(name) {
+  return name.replace(/^tap_/, "").replace(/_(idle|awake|working|alert|waiting|done|longhaul|night|letter|meeting)$/, "").replace(/_/g, " ");
+}
 function drawLump(now) {
   const cv = $("lump"), x = cv.getContext("2d");
+  if (anim.frames.length) {
+    const tick = Math.floor((now - anim.start) / 1000 * anim.fps);
+    if (tick < anim.ticks.length) {
+      x.drawImage(anim.frames[anim.ticks[Math.max(0, tick)]] || anim.frames[0], 0, 0);
+      requestAnimationFrame(drawLump);
+      return;
+    }
+    anim.frames = [];                                                    // finished: back to his mood
+  }
   if (lump.frames.length) {
     const tick = Math.floor((now - lump.start) / 1000 * lump.fps) % lump.ticks.length;
     x.drawImage(lump.frames[lump.ticks[tick]] || lump.frames[0], 0, 0);
@@ -124,6 +152,10 @@ function render(s) {
     : previewing ? "Preview · Back to live returns him to " + (MOOD_LABEL[st.mood] || st.mood).toLowerCase()
     : (LINK_LABEL[st.link] || "Connected");
   showLump(mood, colour);
+  if (board && st.playing) {
+    playEvent(st.playing.name, st.playing.age, colour);
+    if (st.playing.age < 6) $("link").textContent = "Playing " + animLabel(st.playing.name);
+  }
 
   const c = (up && st.counts) || {};
   $("n-working").textContent = c.working || 0; $("n-alert").textContent = c.alert || 0; $("n-unseen").textContent = c.unseen || 0;

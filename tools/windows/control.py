@@ -497,7 +497,7 @@ class Art:
     """Reads lump.bin, the board's own drawings (format: firmware/src/main.cpp, parseAnim): for each mood the
     frames of its loop, as the board's run-length data, which the page decodes and recolours exactly as the
     firmware does. Only the header is parsed up front; frames are read when a mood is first asked for."""
-    LOOP = 0
+    LOOP, EVENT = 0, 2
 
     def __init__(self, path):
         import struct
@@ -514,14 +514,16 @@ class Art:
             p += 1                                       # base mood
             n = d[p]; names.append(d[p + 1:p + 1 + n].decode("ascii", "replace")); p += 1 + n
         n_seqs = d[p]; p += 1
-        self.loops = {}
+        self.loops, self.events = {}, {}
         for _ in range(n_seqs):
             kind, frm = d[p], d[p + 1]; p += 3
-            n = d[p]; p += 1 + n
+            n = d[p]; seq_name = d[p + 1:p + 1 + n].decode("ascii", "replace"); p += 1 + n
             ln = struct.unpack_from("<H", d, p)[0]; p += 2
             seq = list(struct.unpack_from("<%dH" % ln, d, p)); p += ln * 2
             if kind == self.LOOP and frm < len(names):
                 self.loops[names[frm]] = seq
+            elif kind == self.EVENT:
+                self.events[seq_name] = seq
         self.offsets = struct.unpack_from("<%dI" % self.n_frames, d, p)
         self.base = p + self.n_frames * 4
 
@@ -532,8 +534,14 @@ class Art:
 
     def mood(self, name):
         """{"fps", "ticks": indices into "frames", "frames": [base64 run-length data]} for one mood's loop."""
+        return self._pack(self.loops.get(name) or self.loops.get("idle"))
+
+    def event(self, name):
+        """The same for a one-off animation (a gag, fidget, oops, hello), by its exact name; None if unknown."""
+        return self._pack(self.events.get(name))
+
+    def _pack(self, seq):
         import base64
-        seq = self.loops.get(name) or self.loops.get("idle")
         if not seq:
             return None
         order = list(dict.fromkeys(seq))
@@ -598,6 +606,18 @@ class Api:
             except (OSError, ValueError, IndexError) as e:
                 return None
         return self._mood_cache[mood]
+
+    def screen_event(self, name):
+        """A one-off animation the board just started (status "playing"), as the board draws it."""
+        key = ("event", str(name))
+        if key not in self._mood_cache:
+            try:
+                if self._art is None:
+                    self._art = Art(self._art_path)
+                self._mood_cache[key] = self._art.event(str(name))
+            except (OSError, ValueError, IndexError):
+                return None
+        return self._mood_cache[key]
 
     # --- actions
     def play(self, name):

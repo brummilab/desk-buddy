@@ -245,7 +245,7 @@ class Device:
                     # board rebooted, or it had given up on us (no heartbeat) and gone its own way
                     if "lump ready" in text or text == "resync":
                         self._call(self.on_ready)
-                    elif (text == "tap" or text.startswith("gag ")) and self.on_line:
+                    elif (text == "tap" or text.startswith(("gag ", "event "))) and self.on_line:
                         self._call(self.on_line, text)
                     elif text == "err pairing":
                         log.info("the board refused our pairing token: run tools/wifi_setup.py again")
@@ -813,6 +813,7 @@ class Buddy:
         self.sent_colour = None
         self.sent_prep = None          # meeting countdown flag last sent (p 0 / p 1)
         self.preview = None            # a mood sent by hand (POST /cmd "s <mood>"), shown until we next send one
+        self.last_event_anim = None    # the board's latest one-off animation: {"name", "at"} (see note_event)
         self.meeting_alerted = set()   # meeting start times we've already announced
         self.last_oops = 0.0
         self.resync_at = 0.0
@@ -1031,6 +1032,16 @@ class Buddy:
             self.tapped()
         elif text.startswith("gag "):
             self.gag_sound(text[4:].strip())
+        elif text.startswith("event "):
+            self.note_event(text[6:].strip())
+
+    EVENT_NAME = re.compile(r"[a-z0-9_]{1,48}")
+
+    def note_event(self, name):
+        """The board started a one-off animation (firmware "event <name>": a gag, fidget, oops, hello). /status
+        reports it for a little while, so a window mirroring him can play the same drawings in step."""
+        if self.EVENT_NAME.fullmatch(name or ""):
+            self.last_event_anim = {"name": name, "at": time.time()}
 
     def gag_sound(self, event):
         """A gag just started on the board: its sound, unless it's night and you've not been around
@@ -1327,7 +1338,9 @@ class Buddy:
             now = time.time()
             app = getattr(self, "app", None)
             mood = self.mood_locked(now)
-            return {"mood": mood, "shown": self.preview or mood, "sent": self.sent_mood, "counts": self.counts_locked(now), "device": self.dev.connected, "link": getattr(self.dev, "link", None),
+            ev = self.last_event_anim
+            playing = {"name": ev["name"], "age": round(now - ev["at"], 2)} if ev and 0 <= now - ev["at"] < 30 else None
+            return {"mood": mood, "shown": self.preview or mood, "playing": playing, "sent": self.sent_mood, "counts": self.counts_locked(now), "device": self.dev.connected, "link": getattr(self.dev, "link", None),
                     "colour": self.colour(now), "usage": self.usage,
                     "sound": bool(self.sounds.settings().get("enabled")),
                     "next_meeting": self.next_meeting(now),
