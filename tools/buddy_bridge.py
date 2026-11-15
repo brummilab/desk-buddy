@@ -812,6 +812,7 @@ class Buddy:
         self.usage = {}                # from the status line: five_hour / seven_day pct + resets
         self.sent_colour = None
         self.sent_prep = None          # meeting countdown flag last sent (p 0 / p 1)
+        self.preview = None            # a mood sent by hand (POST /cmd "s <mood>"), shown until we next send one
         self.meeting_alerted = set()   # meeting start times we've already announced
         self.last_oops = 0.0
         self.resync_at = 0.0
@@ -1168,6 +1169,7 @@ class Buddy:
                     self.sound("goodnight")
             if self.dev.send("s " + m):
                 self.sent_mood = m
+                self.preview = None
         colour = self.colour(now)
         if force or colour != self.sent_colour:
             if self.dev.send("c " + colour):
@@ -1230,6 +1232,13 @@ class Buddy:
         if changed:
             log.info("usage %s", {k: round(v["pct"]) for k, v in self.usage.items()})
         self.update()
+
+    def note_command(self, text):
+        """A raw command went to the board (POST /cmd). A mood sent that way (a preview from Lump Control, or
+        "s demo") is what he shows until the bridge next sends his real mood, so /status reports it as "shown"."""
+        m = re.fullmatch(r"s\s+([a-z]+)", text.strip())
+        if m:
+            self.preview = m.group(1)
 
     def resend(self):
         self.sent_mood = self.sent_overlay = self.sent_colour = self.sent_prep = None
@@ -1317,7 +1326,8 @@ class Buddy:
         with self.lock:
             now = time.time()
             app = getattr(self, "app", None)
-            return {"mood": self.mood_locked(now), "sent": self.sent_mood, "counts": self.counts_locked(now), "device": self.dev.connected, "link": getattr(self.dev, "link", None),
+            mood = self.mood_locked(now)
+            return {"mood": mood, "shown": self.preview or mood, "sent": self.sent_mood, "counts": self.counts_locked(now), "device": self.dev.connected, "link": getattr(self.dev, "link", None),
                     "colour": self.colour(now), "usage": self.usage,
                     "sound": bool(self.sounds.settings().get("enabled")),
                     "next_meeting": self.next_meeting(now),
@@ -1712,7 +1722,10 @@ class Handler(http.server.BaseHTTPRequestHandler):
         elif self.path == "/calendar":            # re-read the calendar now
             buddy.calendar.refresh_now(); self._reply(200, b"refreshing")
         elif self.path == "/cmd":
-            ok = buddy.dev.send(body.decode().strip()); self._reply(200 if ok else 503, b"ok" if ok else b"board not connected")
+            text = body.decode().strip()
+            ok = buddy.dev.send(text)
+            if ok: buddy.note_command(text)
+            self._reply(200 if ok else 503, b"ok" if ok else b"board not connected")
         elif self.path == "/play":                # an animation by name (GET /play lists them)
             ok = buddy.play(body.decode())
             if ok is None: self._reply(404, b"no such animation (GET /play lists them)")

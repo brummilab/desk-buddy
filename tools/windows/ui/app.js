@@ -116,9 +116,13 @@ function render(s) {
   $("start-bridge").classList.toggle("hidden", up);
   $("halo").classList.toggle("offline", !board);
 
-  const mood = board ? st.mood : "idle";
-  $("mood").textContent = board ? (MOOD_LABEL[st.mood] || st.mood) : up ? "Offline" : "Asleep";
-  $("link").textContent = board ? (LINK_LABEL[st.link] || "Connected") : up ? "Plug him in, or check Wi-Fi" : "Lump can't hear from Claude";
+  // what the board is showing: a mood previewed from the Play tab until the bridge next sends his real one
+  const shown = board ? (st.shown || st.mood) : "idle", previewing = board && shown !== st.mood;
+  const mood = shown === "demo" ? st.mood : shown;
+  $("mood").textContent = board ? (shown === "demo" ? "Showcase" : MOOD_LABEL[shown] || shown) : up ? "Offline" : "Asleep";
+  $("link").textContent = !board ? (up ? "Plug him in, or check Wi-Fi" : "Lump can't hear from Claude")
+    : previewing ? "Preview · Back to live returns him to " + (MOOD_LABEL[st.mood] || st.mood).toLowerCase()
+    : (LINK_LABEL[st.link] || "Connected");
   showLump(mood, colour);
 
   const c = (up && st.counts) || {};
@@ -141,7 +145,7 @@ function render(s) {
   $("no-sessions").classList.toggle("hidden", sess.length > 0 || !up);
 
   // play page
-  for (const b of document.querySelectorAll(".tile")) b.classList.toggle("current", board && b.dataset.mood === st.mood);
+  for (const b of document.querySelectorAll(".tile")) b.classList.toggle("current", board && b.dataset.mood === shown);
   if (!animationsShown && up) loadAnimations();
   if (!document.activeElement || document.activeElement.id !== "tap") { $("tap").value = s.tap; $("tap-value").textContent = Number(s.tap).toFixed(2) + " g"; }
 

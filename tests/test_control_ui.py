@@ -119,6 +119,25 @@ class ApiTest(unittest.TestCase):
             sf.assert_not_called()
 
 
+class PreviewIsWhatHeShows(unittest.TestCase):
+    """A mood previewed from the Play tab goes straight to the board; /status reports it as "shown" until the
+    bridge next sends his real mood."""
+    def test_preview_shown_until_the_bridge_sends_his_mood(self):
+        from test_bridge import bridge, FakeDevice, FakeFocus, FakeSounds, NOON
+        with mock.patch.object(bridge.time, "time", return_value=NOON):
+            b = bridge.Buddy(dev=FakeDevice(), focus=FakeFocus(), sounds=FakeSounds(), start=False)
+            b.update()
+            self.assertEqual(b.status()["shown"], b.status()["mood"])
+            b.note_command("s alert")
+            self.assertEqual(b.status()["shown"], "alert")
+            b.update()                                       # nothing changed: the preview stays on the board
+            self.assertEqual(b.status()["shown"], "alert")
+            b.note_command("T 0.50")                         # not a mood
+            self.assertEqual(b.status()["shown"], "alert")
+            b.update(force=True)                             # Back to live (POST /resync)
+            self.assertEqual(b.status()["shown"], b.status()["mood"])
+
+
 @unittest.skipUnless(os.path.exists(ART), "needs firmware/data/lump.bin")
 class BoardDrawings(unittest.TestCase):
     def test_each_mood_loop_is_whole_frames_of_the_board_data(self):
