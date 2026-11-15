@@ -127,7 +127,7 @@ def set_body_colour(path, hex_):
     """Save his everyday colour to config.json (None or Tangerine removes the setting: back to his default)."""
     h = (hex_ or "").strip().lstrip("#").upper()
     if h and not (len(h) == 6 and all(ch in "0123456789ABCDEF" for ch in h)):
-        raise ValueError("colour must be RRGGBB")
+        raise ValueError("color must be RRGGBB")
     return update_json(path, {"body_colour": None if h in ("", DEFAULT_BODY_COLOUR) else h})
 
 
@@ -280,7 +280,7 @@ class ControlWindow:
         u = lambda k: f"{usage[k]['pct']:.0f}%" if k in usage and usage[k].get("pct") is not None else "–"
         c = st.get("counts") or {}
         meeting = st.get("next_meeting")
-        lines = [f"Colour #{st.get('colour')}   usage: 5-hour {u('five_hour')}, week {u('seven_day')}",
+        lines = [f"Color #{st.get('colour')}   usage: 5-hour {u('five_hour')}, week {u('seven_day')}",
                  f"Working {c.get('working', 0)} · waiting on you {c.get('alert', 0)} · finished, unseen {c.get('unseen', 0)}",
                  f"Sound {'on' if st.get('sound') else 'off'} · Claude app in front: {'yes' if (st.get('focus') or {}).get('claude_in_front') else 'no'}"]
         if meeting:
@@ -330,7 +330,7 @@ class ControlWindow:
         """His everyday body colour. The board recolours his drawings live; the usage gauge and meeting countdown
         still blend from it, and the usage warning still ends in the same reds."""
         ttk, tk = self.ttk, self.tk
-        ttk.Label(f, text="Body colour (usage warnings and meetings still blend from it)", padding=(0, 14, 0, 0)).pack(anchor="w")
+        ttk.Label(f, text="Body color (usage warnings and meetings still blend from it)", padding=(0, 14, 0, 0)).pack(anchor="w")
         row = ttk.Frame(f, padding=(0, 6)); row.pack(fill="x")
         self.colour_swatch = tk.Canvas(row, width=28, height=28, highlightthickness=0)
         self.colour_swatch.pack(side="left", padx=(0, 10))
@@ -351,7 +351,7 @@ class ControlWindow:
     def set_colour(self, hex_, name):
         set_body_colour(CONFIG_FILE, hex_)
         self.colour_swatch.itemconfig(self.colour_dot, fill="#" + current_body_colour())
-        self.run(f"colour {name}", self.bridge.resync)          # the bridge re-reads it and sends the new colour
+        self.run(f"color {name}", self.bridge.resync)          # the bridge re-reads it and sends the new colour
 
     def fill_animations(self):
         def work():
@@ -622,7 +622,7 @@ class Api:
         except ValueError as e:
             return {"ok": False, "message": str(e)}
         r = self._bridge.resync()
-        return {"ok": True, "message": "colour saved" + ("" if r else " (Lump gets it when the bridge is running)")}
+        return {"ok": True, "message": "color saved" + ("" if r else " (Lump gets it when the bridge is running)")}
 
     def set_sound(self, on):
         if self._bridge.sound("on" if on else "off") is None:          # bridge down: write the file ourselves

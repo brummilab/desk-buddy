@@ -79,7 +79,7 @@ button, input { font: inherit; color: inherit; }
 .chip:hover, .chip:focus-visible { border-color: var(--accent); background: var(--accent-soft); }
 .tiles { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 8px; }
 .tile { font-size: 13px; padding: 12px 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--text); cursor: pointer; }
-.tile:hover { border-color: var(--line-strong); }
+.tile:hover, .tile:focus-visible { border-color: var(--accent); background: var(--accent-soft); }
 .tile.current { border-color: var(--accent); }
 
 .list { display: flex; flex-direction: column; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); overflow: hidden; }

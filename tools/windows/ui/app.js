@@ -182,7 +182,7 @@ async function loadAnimations() {
   animationsShown = true;
   const list = await api().animations();
   if (!list.length) { animationsShown = false; return; }
-  $("animations").replaceChildren(...list.map((a) => el("button", { class: "chip", type: "button", onclick: () => act(api().play(a.name)) }, a.label)));
+  $("animations").replaceChildren(...list.map((a) => el("button", { class: "tile", type: "button", onclick: () => act(api().play(a.name)) }, a.label)));
 }
 
 async function poll() {
