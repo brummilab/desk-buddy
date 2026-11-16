@@ -11,6 +11,7 @@
 |---|---|
 | 2026-11-13 | Grill-me-Befragung zur Windows-Brücke geführt, Stufe 1 umgesetzt (Branch `claude/friendly-curie-xs7i7b`). Mit Unit-Tests geprüft (101 Tests grün); auf echter Hardware noch nicht getestet, das Board ist bestellt. |
 | 2026-11-13 | Entscheidung: Kein PR auf `main`, bis der Hardwaretest gelaufen ist. Danach Stufe 2 (Fokus) starten. |
+| 2026-11-16 | Im Original gibt es einen offenen Windows-PR ([joebentham/desk-buddy#2](https://github.com/joebentham/desk-buddy/pull/2), von jakedev796): Brücke, Installer, Flashen, WLAN, **Fokus** und Tray-App „Lump Control“. **Entscheidung: auf PR #2 umschwenken.** Sein Stand liegt im Fork als Branch `windows-upstream-pr2`. Unsere eigene Version (dieser Branch) wird nicht weitergeführt. Gute Teile daraus schlägt David bei Bedarf im PR vor. |
 
 ## Setup (David)
 
@@ -48,9 +49,20 @@
 | `tests/test_windows.py` (neu) | 23 Tests mit Windows-Mocks |
 | `README.md` | Abschnitt „Lump on Windows“ |
 
+## Umschwenken auf PR #2 (2026-11-16)
+
+- Branch `windows-upstream-pr2` = Stand von PR #2 (Commit `f52b259`, 14 Commits, etwa 3.600 Zeilen). Der Hardwaretest läuft **mit diesem Branch**.
+- Pfade laut PR: Claude-App-Logs unter `%LOCALAPPDATA%\Claude\logs`, Session-Daten unter `%APPDATA%\Claude` (ich hatte für die Logs zuerst fälschlich `%APPDATA%` genannt).
+- Anders als bei uns: Autostart über eine Verknüpfung im Autostart-Ordner plus `keepalive.py` statt Aufgabenplanung. Installer `tools\windows\install.ps1`, Flashen `tools\windows\flash.ps1`.
+- Zusätzliche pip-Pakete: `psutil`, `pystray`, `pillow`, `pywebview` (Fenster über WebView2).
+- **Statische Prüfung (2026-11-16):** Netzwerk nur `127.0.0.1` (Brücke 47823, Lump Control 47825 lokal). Keine Downloads außer pip-Paketen von PyPI. Kein Base64- oder Encoded-Command-Trick, keine Registry-Änderungen. Schreibt nur nach `~\.desk-buddy`, in den Autostart-Ordner und in `settings.json` (Hooks). Die Tests von PR #2 wurden in der Cloud **nicht ausgeführt** (fremder Code, blockiert).
+- Stufe 2 (Fokus) steckt bereits in PR #2. Unsere eigene Stufe 2 entfällt.
+- Wenn wir als Erweiterung vorschlagen wollen: Absicherung gegen eine doppelt gestartete Brücke (`allow_reuse_address` unter Windows, bei PR #2 per `keepalive.py`-Portcheck gelöst), Aufgabenplanung als Alternative.
+
 ## Offene Punkte / zu testen, sobald das Board da ist
 
-- [ ] `py tools\lump_ports.py -v`: Wird der CH343 erkannt, und mit welcher PID?
+- [ ] Mit Branch `windows-upstream-pr2`: `tools\windows\install.ps1`, `tools\windows\flash.ps1`, `install_hooks.py`
+- [ ] Erkennt PR #2 den CH343? Er erwartet genau `1A86:55D3`. Kennung prüfen mit `py -m serial.tools.list_ports -v`
 - [ ] `flash.ps1` mit Pacing, danach `-Fast` testen. Braucht Windows das Pacing überhaupt?
 - [ ] `install_bridge.ps1`: Lässt sich die geplante Aufgabe ohne Adminrechte anlegen?
 - [ ] Hooks kommen an (`curl 127.0.0.1:47823/status` während einer Session)
