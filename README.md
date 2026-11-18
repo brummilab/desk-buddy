@@ -25,9 +25,8 @@ plays back at 24 fps.
   [this AliExpress listing](https://www.aliexpress.com/item/1005009887388696.html), colour option
   **ESP32-S3-LCD-1.3-C** (about $20). Keep its stock case: the mount is sized for it.
 - **A USB-C data cable** for the first flash. After Wi-Fi setup he only needs power.
-- **A Mac, or a Windows PC.** The bridge that connects Claude to Lump runs on macOS (launchd, a small
-  Swift helper, `afplay`) and, for Claude Code, on Windows 10/11 (see [Lump on Windows](#lump-on-windows)).
-  The firmware itself doesn't care.
+- **A Mac.** The bridge that connects Claude to Lump is macOS-only (launchd, a small Swift helper,
+  `afplay`). The firmware itself doesn't care.
 - **Claude Code**, plus optionally the Claude desktop app (for Chat and Cowork states).
 - [PlatformIO](https://platformio.org/) (`brew install platformio`), Python 3, and the Xcode
   command line tools (`xcode-select --install`).
@@ -99,37 +98,6 @@ Sounds: `~/.desk-buddy/sounds.json` picks which moments make a noise (`"enabled"
 A second Claude Code config (such as `~/.claude-work`) can drive him too: run
 `python3 tools/install_hooks.py --config-dir ~/.claude-work`.
 
-### Lump on Windows
-
-The bridge also runs on Windows 10/11, for **Claude Code** (native, not WSL). Not yet on Windows:
-Chat and Cowork states (the app watcher reads the Mac app), and knowing which app is in front, so a
-finished session stays "unread" until there's news in it rather than when you look at it. The little
-Lump for your screen is Mac-only. Status: written and unit-tested, not yet tried on a real board.
-
-You need Python 3 with the `py` launcher (`winget install Python.Python.3.12`), Git for Windows
-(Claude Code's shell; its hooks fall back to PowerShell without it), and for flashing PlatformIO
-(`py -m pip install platformio`). The board's CH343 USB chip normally works with Windows' own driver;
-if no COM port appears, install WCH's CH343 driver. In PowerShell, from the repo:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File tools\flash.ps1           # 1. flash (-NoArt: program only, -Port COM7, -Fast: unpaced)
-powershell -ExecutionPolicy Bypass -File tools\install_bridge.ps1  # 2. bridge as a scheduled task at logon
-py tools\install_hooks.py                                          # 3. hooks + status line (tools\statusline.py)
-~\.desk-buddy\venv\Scripts\python.exe tools\wifi_setup.py         # 4. optional: Wi-Fi
-```
-
-- The bridge runs as the scheduled task **DeskBuddyBridge** (as you, no admin; restarted within a minute
-  if it stops). If your PC doesn't allow that, the installer falls back to a shortcut in the Startup folder.
-  Remove it with `tools\install_bridge.ps1 -Uninstall`.
-- He's found by his USB ids (WCH CH343), not just any COM port. `py tools\lump_ports.py -v` lists every
-  port with its ids; `"serial_port": "COM7"` in `~\.desk-buddy\config.json` pins one.
-- Sounds play through Windows' own `winsound`. It has no volume control, so the bridge keeps quieter
-  copies of the sounds in `~\.desk-buddy\sounds\.vol`.
-- `flash.ps1` and `wifi_setup.py` pause the bridge while they use the port (on Windows only one program
-  may have it open), and start it again afterwards.
-- Over Wi-Fi he's `lump.local`, which Windows 10/11 resolve themselves. If not, put his IP in
-  `config.json` as `"lump_host"`.
-
 ### Lump on your Mac (for when you're away from the desk)
 
 A little Lump for your screen that mirrors the desk one. On a MacBook with a notch he sits in a small
@@ -185,8 +153,6 @@ calendar / Slack ──┘   one mood for all sessions                   plays b
 | `tools/appwatch/` | Swift helper that reads Chat/Cowork state from the Claude app's accessibility tree |
 | `tools/lumpbar/` | Lump on your Mac: frame baker (`bake.py`) and the notch/menu bar app (`main.swift`) |
 | `tools/flash.sh`, `tools/ota.py`, `tools/wifi_setup.py` | Getting firmware and drawings onto the board |
-| `tools/install_bridge.ps1`, `tools/flash.ps1`, `tools/statusline.py` | The Windows versions of the bridge installer, flashing and the status line |
-| `tools/lump_ports.py` | Finding the board on USB (macOS and Windows), and pausing the bridge while another tool needs the port |
 | `enclosure/` | OpenSCAD source for the adjustable monitor mount, with [ready-to-print STLs](enclosure/print/) |
 | `tests/` | Bridge tests (no board needed): `~/.desk-buddy/venv/bin/python -m unittest discover -s tests` |
 

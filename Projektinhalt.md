@@ -12,6 +12,8 @@
 | 2026-11-13 | Grill-me-Befragung zur Windows-Brücke geführt, Stufe 1 umgesetzt (Branch `claude/friendly-curie-xs7i7b`). Mit Unit-Tests geprüft (101 Tests grün); auf echter Hardware noch nicht getestet, das Board ist bestellt. |
 | 2026-11-13 | Entscheidung: Kein PR auf `main`, bis der Hardwaretest gelaufen ist. Danach Stufe 2 (Fokus) starten. |
 | 2026-11-16 | Im Original gibt es einen offenen Windows-PR ([joebentham/desk-buddy#2](https://github.com/joebentham/desk-buddy/pull/2), von jakedev796): Brücke, Installer, Flashen, WLAN, **Fokus** und Tray-App „Lump Control“. **Entscheidung: auf PR #2 umschwenken.** Sein Stand liegt im Fork als Branch `windows-upstream-pr2`. Unsere eigene Version (dieser Branch) wird nicht weitergeführt. Gute Teile daraus schlägt David bei Bedarf im PR vor. |
+| 2026-11-18 | Statische Zeile-für-Zeile-Prüfung von PR #2: keine Hinweise auf Schadcode, aber Stolpersteine für Firmen-Laptops (Hook-Befehl in PowerShell, Proxy für `127.0.0.1`, Constrained Language Mode, Datenverlust beim Speichern in Lump Control). Kommentartext für den PR liegt im Chat. |
+| 2026-11-18 | Unser Branch wurde versehentlich in `main` gemergt ([brummilab/desk-buddy#1](https://github.com/brummilab/desk-buddy/pull/1)). Der Merge wird per Revert rückgängig gemacht. `main` = Original plus diese Datei. Unsere erste Version bleibt in der Historie (`06bc9fa`). |
 
 ## Setup (David)
 
