@@ -10,6 +10,7 @@ from unittest import mock
 
 HOME = tempfile.mkdtemp(prefix="deskbuddy-test-")
 os.environ["DESKBUDDY_HOME"] = HOME
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "tools"))   # lump_ports
 _spec = importlib.util.spec_from_file_location(
     "buddy_bridge", os.path.join(os.path.dirname(__file__), "..", "tools", "buddy_bridge.py"))
 bridge = importlib.util.module_from_spec(_spec)
