@@ -14,6 +14,7 @@
 | 2026-11-16 | Im Original gibt es einen offenen Windows-PR ([joebentham/desk-buddy#2](https://github.com/joebentham/desk-buddy/pull/2), von jakedev796): Brücke, Installer, Flashen, WLAN, **Fokus** und Tray-App „Lump Control“. **Entscheidung: auf PR #2 umschwenken.** Sein Stand liegt im Fork als Branch `windows-upstream-pr2`. Unsere eigene Version (dieser Branch) wird nicht weitergeführt. Gute Teile daraus schlägt David bei Bedarf im PR vor. |
 | 2026-11-18 | Statische Zeile-für-Zeile-Prüfung von PR #2: keine Hinweise auf Schadcode, aber Stolpersteine für Firmen-Laptops (Hook-Befehl in PowerShell, Proxy für `127.0.0.1`, Constrained Language Mode, Datenverlust beim Speichern in Lump Control). Kommentartext für den PR liegt im Chat. |
 | 2026-11-18 | Unser Branch wurde versehentlich in `main` gemergt ([brummilab/desk-buddy#1](https://github.com/brummilab/desk-buddy/pull/1)). Der Merge wird per Revert rückgängig gemacht. `main` = Original plus diese Datei. Unsere erste Version bleibt in der Historie (`06bc9fa`). |
+| 2026-11-18 | Revert auf `main` gepusht (`c6b855a`). Korrekturen aus dem Review auf Branch **`windows-pr2-fixes`** (Basis: PR #2, Commit `369fae4`): Hooks ohne Shell (`curl.exe` in Exec-Form, `--noproxy`), kein Proxy für lokale Aufrufe (Statuszeile, Lump Control, OTA), Installer trennt die Tray-Pakete und weicht im Constrained Language Mode auf `.cmd` im Autostart aus, App-Liste wird beim Speichern nicht mehr gelöscht, sichere JSON-Schreibvorgänge, Log-Suche an allen drei Orten, Umlaut-SSIDs, Zeitzonen-Fehlercheck. Nur gelesen und auf Syntax geprüft, Tests nicht ausgeführt. **Hardwaretest jetzt mit `windows-pr2-fixes`.** |
 
 ## Setup (David)
 
@@ -63,7 +64,8 @@
 
 ## Offene Punkte / zu testen, sobald das Board da ist
 
-- [ ] Mit Branch `windows-upstream-pr2`: `tools\windows\install.ps1`, `tools\windows\flash.ps1`, `install_hooks.py`
+- [ ] Mit Branch `windows-pr2-fixes`: `tools\windows\install.ps1`, `tools\windows\flash.ps1`, `install_hooks.py`
+- [ ] Auf dem Dienstrechner prüfen: `netsh winhttp show proxy`, `$ExecutionContext.SessionState.LanguageMode`, `Get-ExecutionPolicy -List`
 - [ ] Erkennt PR #2 den CH343? Er erwartet genau `1A86:55D3`. Kennung prüfen mit `py -m serial.tools.list_ports -v`
 - [ ] `flash.ps1` mit Pacing, danach `-Fast` testen. Braucht Windows das Pacing überhaupt?
 - [ ] `install_bridge.ps1`: Lässt sich die geplante Aufgabe ohne Adminrechte anlegen?
