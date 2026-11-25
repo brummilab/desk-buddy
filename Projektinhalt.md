@@ -81,7 +81,7 @@
 - [ ] Lump Control offen lassen und abmelden: Blockiert es das Abmelden?
 - [ ] Nach dem Neuanmelden: Startet die Brücke von selbst?
 - [ ] WLAN (nicht mit dem Firmen-WLAN; das Passwort liegt unverschlüsselt auf dem Board)
-- [ ] Rückmeldung an den Autor von PR #2 (Testergebnis und Korrekturen)
+- [x] Rückmeldung an den Autor von PR #2 gepostet (2026-11-25): Testergebnis und Korrekturen, Angebot eines PRs gegen seinen Branch. Antwort abwarten.
 
 ## Nächste Stufen
 
