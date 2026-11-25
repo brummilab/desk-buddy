@@ -81,7 +81,9 @@
 - [ ] Lump Control offen lassen und abmelden: Blockiert es das Abmelden?
 - [ ] Nach dem Neuanmelden: Startet die Brücke von selbst?
 - [ ] WLAN (nicht mit dem Firmen-WLAN; das Passwort liegt unverschlüsselt auf dem Board)
-- [x] Rückmeldung an den Autor von PR #2 gepostet (2026-11-25): Testergebnis und Korrekturen, Angebot eines PRs gegen seinen Branch. Antwort abwarten.
+- [x] Rückmeldung an den Autor von PR #2 gepostet (2026-11-25): Testergebnis und Korrekturen, Angebot eines PRs gegen seinen Branch.
+- [x] Autor (jakedev796) hat geantwortet und um einen PR gegen seinen Branch `windows-support` gebeten. PR gestellt (2026-11-25): [jakedev796/desk-buddy#1](https://github.com/jakedev796/desk-buddy/pull/1) (`brummilab:windows-pr2-fixes` → `windows-support`). Sein Review abwarten; nach dem Merge landen die Korrekturen in [joebentham/desk-buddy#2](https://github.com/joebentham/desk-buddy/pull/2).
+- [ ] Offen beim Autor: Datenordner `%LOCALAPPDATA%\Claude-Data\claude_<id>` wird als zweites Konto geführt (er schaut es sich an).
 
 ## Nächste Stufen
 
