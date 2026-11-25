@@ -48,6 +48,15 @@ if (-not (Test-Path $Python)) {
     elseif (Get-Command python -ErrorAction SilentlyContinue) { Invoke-Checked "python" @("-m", "venv", $Venv) }
     else { throw "Python 3 isn't installed: get it from python.org (or the Microsoft Store), then run this again." }
 }
+# Behind a corporate network that inspects HTTPS, pip and PlatformIO don't know the company's root
+# certificate (Windows does). Give them Windows' trust list for this run (see ca_bundle.py).
+function Use-WindowsCertificates([string]$Py) {
+    $ca = Join-Path (Join-Path $HOME ".desk-buddy") "windows-ca.pem"
+    & $Py -I (Join-Path $PSScriptRoot "ca_bundle.py") $ca
+    if (-not $LASTEXITCODE) { $env:PIP_CERT = $ca; $env:REQUESTS_CA_BUNDLE = $ca; $env:SSL_CERT_FILE = $ca }
+}
+
+Use-WindowsCertificates $Python
 Invoke-Checked $Python @("-m", "pip", "-q", "install", "--disable-pip-version-check", "--upgrade", "pip")
 Invoke-Checked $Python @("-m", "pip", "-q", "install", "--disable-pip-version-check", "pyserial", "psutil", "icalendar", "recurring-ical-events")
 # Lump Control's packages on their own: if one has no wheel for this Python (pywebview needs pythonnet),
