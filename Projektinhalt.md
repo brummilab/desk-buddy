@@ -15,6 +15,7 @@
 | 2026-11-18 | Statische Zeile-für-Zeile-Prüfung von PR #2: keine Hinweise auf Schadcode, aber Stolpersteine für Firmen-Laptops (Hook-Befehl in PowerShell, Proxy für `127.0.0.1`, Constrained Language Mode, Datenverlust beim Speichern in Lump Control). Kommentartext für den PR liegt im Chat. |
 | 2026-11-18 | Unser Branch wurde versehentlich in `main` gemergt ([brummilab/desk-buddy#1](https://github.com/brummilab/desk-buddy/pull/1)). Der Merge wird per Revert rückgängig gemacht. `main` = Original plus diese Datei. Unsere erste Version bleibt in der Historie (`06bc9fa`). |
 | 2026-11-18 | Revert auf `main` gepusht (`c6b855a`). Korrekturen aus dem Review auf Branch **`windows-pr2-fixes`** (Basis: PR #2, Commit `369fae4`): Hooks ohne Shell (`curl.exe` in Exec-Form, `--noproxy`), kein Proxy für lokale Aufrufe (Statuszeile, Lump Control, OTA), Installer trennt die Tray-Pakete und weicht im Constrained Language Mode auf `.cmd` im Autostart aus, App-Liste wird beim Speichern nicht mehr gelöscht, sichere JSON-Schreibvorgänge, Log-Suche an allen drei Orten, Umlaut-SSIDs, Zeitzonen-Fehlercheck. Nur gelesen und auf Syntax geprüft, Tests nicht ausgeführt. **Hardwaretest jetzt mit `windows-pr2-fixes`.** |
+| 2026-11-25 | **Hardwaretest unter Windows bestanden** (Details unten). Zertifikat-Fix für das Firmennetz eingebaut (`be10287`). |
 
 ## Setup (David)
 
@@ -62,19 +63,27 @@
 - Stufe 2 (Fokus) steckt bereits in PR #2. Unsere eigene Stufe 2 entfällt.
 - Wenn wir als Erweiterung vorschlagen wollen: Absicherung gegen eine doppelt gestartete Brücke (`allow_reuse_address` unter Windows, bei PR #2 per `keepalive.py`-Portcheck gelöst), Aufgabenplanung als Alternative.
 
-## Offene Punkte / zu testen, sobald das Board da ist
+## Hardwaretest Windows (2026-11-25), Branch `windows-pr2-fixes`: bestanden
 
-- [ ] Mit Branch `windows-pr2-fixes`: `tools\windows\install.ps1`, `tools\windows\flash.ps1`, `install_hooks.py`
-- [ ] Auf dem Dienstrechner prüfen: `netsh winhttp show proxy`, `$ExecutionContext.SessionState.LanguageMode`, `Get-ExecutionPolicy -List`
-- [ ] Erkennt PR #2 den CH343? Er erwartet genau `1A86:55D3`. Kennung prüfen mit `py -m serial.tools.list_ports -v`
-- [ ] `flash.ps1` mit Pacing, danach `-Fast` testen. Braucht Windows das Pacing überhaupt?
-- [ ] `install_bridge.ps1`: Lässt sich die geplante Aufgabe ohne Adminrechte anlegen?
-- [ ] Hooks kommen an (`curl 127.0.0.1:47823/status` während einer Session)
-- [ ] Sounds hörbar, Lautstärke wirkt, Gag-Sounds synchron (`AFPLAY_LAG` ggf. anpassen)
-- [ ] WLAN: Wird `lump.local` aufgelöst? Stimmt die Zeitzone (Uhrzeit, Nachtmodus)?
-- [ ] Die `.ps1`-Skripte wurden in der Cloud nicht ausgeführt (dort gibt es kein PowerShell). Erster echter Lauf bei David.
+- [x] Dienstrechner: kein Proxy (WinHTTP), `FullLanguage`, keine Execution Policy per GPO, PowerShell ohne Adminrechte
+- [x] Board erkannt: `USB\VID_1A86&PID_55D3` auf **COM4**, Windows-eigener Treiber. **Erst nach Kabeltausch.** Die ersten beiden USB-C-Kabel waren reine Ladekabel: Das Display leuchtete, aber Windows sah kein Gerät.
+- [x] Flashen mit `flash.ps1` (ohne Bremse, die Zeichnungen in 41 s). **Firmennetz:** pip bzw. PlatformIO scheiterten an `CERTIFICATE_VERIFY_FAILED` (TLS-Inspection). Gelöst mit dem Export der Windows-Zertifikate; jetzt fest eingebaut (`tools/windows/ca_bundle.py`, Commit `be10287`). PlatformIO zog `espressif32@8.0.0`, der Build ist ok.
+- [x] `install.ps1`: Brücke und Lump Control (WebView2) laufen, Autostart über Verknüpfungen (kein `.cmd`-Ausweichweg nötig)
+- [x] `install_hooks.py` mit dem Python aus dem venv: Hooks in Exec-Form (`curl.exe`) kommen an
+- [x] Arbeiten → Feiern ✔, Rückfrage (`PermissionRequest`) → alert ✔, Nutzungsfarbe aus der Desktop-App (Woche 97 % → rot) ✔
+- [x] Klopfen: Sensor gefunden (`imu=on`). Braucht einen kräftigen Klopfer (Schwelle 0,35 g, gemessen 0,43 g), in Lump Control anpassbar. Gag (Disco) mit Ton ✔
+- **Wichtig:** Cloud-Sitzungen (claude.ai/code, wie diese Chat-Sitzung) lösen **keine** Hooks auf dem Laptop aus. Nur lokale Claude-Code-Sitzungen treiben Lump.
+- Auffällig: Die Claude-App speichert ihre Daten unter `AppData\Local\Claude-Data\claude_pzs8sxrjxfjjc`. Die Brücke führt das als zweites Konto `claude-pzs8sxrjxfjjc`; prüfen, ob das stört.
+
+## Noch offen
+
+- [ ] Fokus-Erkennung testen: Wechsel in eine fertige Session → „unseen“ sollte verschwinden
+- [ ] Lump Control offen lassen und abmelden: Blockiert es das Abmelden?
+- [ ] Nach dem Neuanmelden: Startet die Brücke von selbst?
+- [ ] WLAN (nicht mit dem Firmen-WLAN; das Passwort liegt unverschlüsselt auf dem Board)
+- [ ] Rückmeldung an den Autor von PR #2 (Testergebnis und Korrekturen)
 
 ## Nächste Stufen
 
-- **Stufe 2 (Fokus):** vordere App über `GetForegroundWindow` + Prozessname (ctypes). Session-Fokus aus dem Log der Windows-Claude-App (`%APPDATA%\Claude\logs`?) und `claude-code-sessions`. Pfade erst auf echtem Windows prüfen.
+- **Stufe 2 (Fokus):** steckt in PR #2; Test steht noch aus (siehe „Noch offen“).
 - **Stufe 3 (Chat/Cowork):** UI-Automation-Baum der Windows-Claude-App (Electron) untersuchen und ein Python-Helfer, der dieselbe JSON an `/app` schickt wie der Swift-Helfer.
